@@ -324,3 +324,58 @@ AI 模式会先生成分析标准，再创建任务。现在该流程已改为�
 [![Star History Chart](https://api.star-history.com/svg?repos=Usagi-org/ai-goofish-monitor&type=Date)](https://www.star-history.com/#Usagi-org/ai-goofish-monitor&Date)
 
 ![Alt](https://repobeats.axiom.co/api/embed/b40d8a112271b4bddabadd8fe2635be3c1aa28a3.svg "Repobeats analytics image")
+
+## 列表标题预筛（默认关闭）
+
+任务可配置独立的 `prefilter`，在搜索列表解析、整页价格快照和既有去重之后，详情等待及页面创建之前判断标题。`off` 不评估；`shadow` 仅记录 `would_reject`，继续全部原流程；只有 `enforce` 的明确拒绝才跳过详情、卖家画像、图片、AI、结果保存和通知。目标、未知、配置/评估异常均放行。预筛与 AI/关键词决策模式独立，保留不代表推荐；不按容量拒绝，也不改 Prompt、调度、翻页或请求节奏。
+
+### 配置与启停
+
+完整 Mac mini 示例见 [`examples/mac-mini-prefilter.patch.json`](examples/mac-mini-prefilter.patch.json)，默认 `shadow`，包含 M1–M5 / Intel 拒绝词、M6 保留词及比较、配件、否定、置换等歧义词。型号仅为字符串规则示例。引擎不包含 Mac 专属逻辑；其他商品必须自行配置锚点、标签和歧义词。仅支持字面量，不执行正则或脚本。支持 NFKC/大小写/空白归一化，以及锚点与标签之间有限的空白、点、下划线、冒号和短横线；不识别的写法保留。
+
+在已有访问权限的部署上，用既有认证网关/会话访问 API（本项目 `/auth/status` 只校验 Web 登录凭据，并不签发 API token；API 的访问保护沿用部署设置）。以下本地命令使用目标任务 ID，请替换 `0`；如部署有认证网关，沿用其认证方式：
+
+```bash
+curl --fail-with-body -X PATCH http://127.0.0.1:8000/api/tasks/0 \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/mac-mini-prefilter.patch.json
+curl --fail-with-body http://127.0.0.1:8000/api/tasks/0
+```
+
+POST 创建、`POST /api/tasks/generate`（AI/关键词均支持）及 GET 都携带该字段。PATCH 省略 `prefilter` 保留旧值；对象整体替换；`null` 清除；`{"prefilter":{"version":1,"mode":"off","kind":"anchored_title_tokens"}}` 关闭。若要保留规则，提交原完整对象并只改 `mode`。无效类型、未知键、版本错误、空词条、冲突词集等在 API 写入前返回 422，不改变原配置。每组最多 64 个词，每词原文和归一化后最多 64 字符；启用时必须有商品锚点和拒绝标签。
+
+本版不增加 Web 表单控件。普通 Web 编辑可保留已设置的预筛；清除请用 API 显式提交 `null`。规则只在每次启动时读取并编译，运行中的子进程保持原快照。
+
+CLI：把示例中的整个 `prefilter` 对象放到任务 JSON 对象中，再运行 `python spider_v2.py --config /path/to/tasks.json --task-name '目标任务'`；不传 `--config` 时从 SQLite 读取同一字段。请保留目标任务的 `decision_mode=ai`、原 Criteria 路径和图片选项。不要用 `SKIP_AI_ANALYSIS` 验证预筛，它可能触发直接推荐。
+
+### 日志与离线回放
+
+每次启用输出 `prefilter.start` 和一次 `prefilter.summary`；摘要包含模式、退出状态、尝试次数、`evaluated/passed/would_reject/skipped/fail_open`、原因分布和评估耗时。`evaluated = passed + skipped`；重复出现按出现次数统计，不代表唯一商品或真实节省请求。错误只记录类型，不记录原始输入；诊断拒绝日志每次最多 20 条，只含页码、候选序号、有限标签和原因，不含标题、完整链接或卖家资料。
+
+```bash
+# 不调用爬虫、网络、模型或通知。输入为标题数组或含 商品标题/商品链接 的对象数组。
+python -m tools.replay_listing_prefilter \
+  --policy examples/mac-mini-prefilter.patch.json \
+  --input examples/prefilter-titles.json
+python -m pytest -m 'not live and not live_slow' \
+  tests/unit/test_listing_prefilter.py tests/integration/test_prefilter_storage.py \
+  tests/integration/test_scraper_prefilter.py tests/integration/test_api_tasks.py
+```
+
+离线固定四条样本（旧代、目标、未知、多型号）贯穿真实爬虫与 dispatcher，使用隔离 SQLite、空卖家缓存、不同卖家及图片，外部入口用记录型替身：
+
+| 模式 | 详情导航 | 画像抓取 | 图片下载入口 | AI 入口 | 保存/通知 | 搜索快照条数 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| off | 4 | 4 | 4 | 4 | 各 4 | 4 |
+| shadow | 4 | 4 | 4 | 4 | 各 4 | 4 |
+| enforce | 3 | 3 | 3 | 3 | 各 3 | 4 |
+
+这是入口调用对照，不能换算为真实 HTTP/模型请求数量。搜索快照仍为整页混合样本，不能称为精确目标型号行情；原历史结果仍保留。预筛拒绝不写持久去重键，同链接标题修正、规则修改或关闭后仍可按原流程处理。第一页全拒也按原页数预算翻页。
+
+### 迁移、观察与回滚
+
+启动时为旧库增补可空 `tasks.prefilter_json`，schema 检查与 DDL 用 SQLite 写事务跨进程序列化，可重复启动，不重建表、不清除任务、结果或价格快照。历史任务缺失字段即关闭；一次性旧 JSON 导入会保留合法规则，坏规则仅该任务关闭并警告；数据库坏规则不会掩盖其他字段或数据库错误。请沿用现有数据库备份流程。
+
+先部署默认 off，再仅将目标任务设为 shadow，按原调度观察至少两个正常周期并人工复核脱敏拒绝样本；样本不足继续 shadow。确认无误后再整对象切换 enforce。出现误拒或配置异常时 PATCH `{"prefilter":null}` 或完整规则 `mode=off` 并 GET 核对；需要立即生效则通过现有流程停止运行中的任务后重启。预筛未写去重键，无须清空原去重。
+
+代码回滚保留新增列，并先导出规则和一致数据库备份：旧版 `INSERT OR REPLACE` 保存任务可能把新增列重置为 NULL。不要用旧库直接覆盖新结果。未再次召回或已下架商品无法保证补抓。本次开发未进行真实登录、线上采集、模型调用、部署或模式切换。

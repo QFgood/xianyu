@@ -15,6 +15,7 @@
     "free_shipping": true,
     "new_publish_option": "14天内",
     "region": "江苏/南京/全南京",
+    "prefilter": null,
     "is_running": false
   }
 ]

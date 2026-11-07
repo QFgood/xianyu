@@ -8,6 +8,7 @@ import json
 import threading
 from pathlib import Path
 
+from src.domain.models.prefilter import parse_stored_prefilter
 from src.infrastructure.persistence.sqlite_connection import init_schema, sqlite_connection
 from src.infrastructure.persistence.storage_names import (
     build_result_filename,
@@ -75,6 +76,7 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
     for index, raw_task in enumerate(tasks):
         if not isinstance(raw_task, dict):
             continue
+        policy = parse_stored_prefilter(raw_task.get("prefilter"))
         conn.execute(
             """
             INSERT INTO tasks (
@@ -82,8 +84,8 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
                 max_pages, personal_only, min_price, max_price, cron,
                 ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                 account_strategy, free_shipping, new_publish_option, region,
-                decision_mode, keyword_rules_json, is_running
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                decision_mode, keyword_rules_json, is_running, prefilter_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 index,
@@ -107,6 +109,7 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
                 raw_task.get("decision_mode", "ai"),
                 json.dumps(raw_task.get("keyword_rules") or [], ensure_ascii=False),
                 _as_int(raw_task.get("is_running", False)),
+                policy.model_dump_json() if policy is not None else None,
             ),
         )
     _mark_bootstrap_completed(conn, TASKS_BOOTSTRAP_KEY)

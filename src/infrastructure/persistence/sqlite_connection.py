@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -43,7 +44,8 @@ SCHEMA_STATEMENTS = (
         region TEXT,
         decision_mode TEXT NOT NULL,
         keyword_rules_json TEXT NOT NULL,
-        is_running INTEGER NOT NULL
+        is_running INTEGER NOT NULL,
+        prefilter_json TEXT
     )
     """,
     """
@@ -134,14 +136,31 @@ def _prepare_database_file(path: str) -> None:
 
 
 def _apply_pragmas(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    # Initial journal-mode negotiation can fail immediately when another process
+    # is switching the same database to WAL, even with busy_timeout configured.
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as exc:
+            code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+            remaining = deadline - time.monotonic()
+            if code not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED} or remaining <= 0:
+                raise
+            time.sleep(min(0.05, remaining))
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
+    # Serialize schema checks and DDL across API / worker processes.
+    conn.execute("BEGIN IMMEDIATE")
     for statement in SCHEMA_STATEMENTS:
         conn.execute(statement)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+    if "prefilter_json" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN prefilter_json TEXT")
     _migrate_result_items_status(conn)
     conn.commit()
 

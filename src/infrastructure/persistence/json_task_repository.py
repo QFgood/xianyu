@@ -5,6 +5,7 @@ from typing import List, Optional
 import json
 import aiofiles
 from src.domain.models.task import Task
+from src.domain.models.prefilter import parse_stored_prefilter
 from src.domain.repositories.task_repository import TaskRepository
 
 
@@ -25,6 +26,7 @@ class JsonTaskRepository(TaskRepository):
                 tasks_data = json.loads(content)
                 tasks = []
                 for i, task_data in enumerate(tasks_data):
+                    task_data['prefilter'] = parse_stored_prefilter(task_data.get('prefilter'))
                     task_data['id'] = i
                     tasks.append(Task(**task_data))
                 return tasks

@@ -58,6 +58,7 @@ def test_start_stop_task_updates_status(api_client, api_context, sample_task_pay
 
 def test_generate_keyword_mode_task_without_ai_criteria(api_client):
     payload = {
+        "prefilter": {"mode": "off"},
         "task_name": "A7M4 关键词筛选",
         "keyword": "sony a7m4",
         "description": "",
@@ -70,6 +71,7 @@ def test_generate_keyword_mode_task_without_ai_criteria(api_client):
     response = api_client.post("/api/tasks/generate", json=payload)
     assert response.status_code == 200
     created = response.json()["task"]
+    assert created["prefilter"]["mode"] == "off"
     assert created["decision_mode"] == "keyword"
     assert created["ai_prompt_criteria_file"] == ""
     assert created["keyword_rules"] == ["a7m4", "验货宝"]
@@ -77,6 +79,7 @@ def test_generate_keyword_mode_task_without_ai_criteria(api_client):
 
 def test_generate_ai_task_returns_job_and_completes_async(api_client, api_context, monkeypatch):
     payload = {
+        "prefilter": {"mode": "off"},
         "task_name": "Apple Watch S10",
         "keyword": "apple watch s10",
         "description": "只看国行蜂窝版，电池健康高于 95%，拒绝维修机。",
@@ -115,6 +118,7 @@ def test_generate_ai_task_returns_job_and_completes_async(api_client, api_contex
     else:
         raise AssertionError("任务生成作业未在预期时间内完成")
 
+    assert latest_job["task"]["prefilter"]["mode"] == "off"
     assert latest_job["task"]["task_name"] == payload["task_name"]
     assert latest_job["task"]["ai_prompt_criteria_file"].endswith("_criteria.txt")
     assert latest_job["task"]["analyze_images"] is False
@@ -193,3 +197,23 @@ def test_delete_task_stops_runtime_and_reindexes_process_state(
     process_service = api_context["process_service"]
     assert process_service.stopped == [0]
     assert process_service.reindexed == []
+
+
+def test_prefilter_patch_contract_and_validation(api_client, sample_task_payload, monkeypatch):
+    from unittest.mock import AsyncMock
+    policy = dict(version=1, mode='shadow', kind='anchored_title_tokens', product_aliases=['Product'], reject_tokens=['V1'], keep_tokens=['V2'])
+    generate = AsyncMock(side_effect=AssertionError('prefilter must not regenerate criteria'))
+    monkeypatch.setattr('src.api.routes.tasks.generate_criteria', generate)
+    response = api_client.post('/api/tasks/', json=sample_task_payload | {'prefilter': policy})
+    assert response.status_code == 200
+    assert response.json()['task']['prefilter']['mode'] == 'shadow'
+    assert api_client.patch('/api/tasks/0', json={'enabled': False}).status_code == 200
+    assert api_client.get('/api/tasks/0').json()['prefilter']['mode'] == 'shadow'
+    for invalid in (policy | {'mode': 'invalid'}, policy | {'unknown': True}, policy | {'keep_tokens': ['v1']}, [], 'invalid'):
+        assert api_client.patch('/api/tasks/0', json={'prefilter': invalid}).status_code == 422
+        assert api_client.get('/api/tasks/0').json()['prefilter']['mode'] == 'shadow'
+    assert api_client.patch('/api/tasks/0', json={'prefilter': policy | {'mode': 'enforce'}}).json()['task']['prefilter']['mode'] == 'enforce'
+    off = {'version': 1, 'mode': 'off', 'kind': 'anchored_title_tokens'}
+    assert api_client.patch('/api/tasks/0', json={'prefilter': off}).json()['task']['prefilter']['product_aliases'] == []
+    assert api_client.patch('/api/tasks/0', json={'prefilter': None}).json()['task']['prefilter'] is None
+    generate.assert_not_called()

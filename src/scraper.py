@@ -46,6 +46,7 @@ from src.utils import (
 )
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.failure_guard import FailureGuard
+from src.services.listing_prefilter import PrefilterRun
 from src.services.account_strategy_service import resolve_account_runtime_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.item_analysis_dispatcher import (
@@ -504,6 +505,20 @@ async def scrape_user_profile(context, user_id: str) -> dict:
 
 
 async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
+    prefilter = PrefilterRun(task_config.get("prefilter"), task_id=task_config.get("id"))
+    status = "failed"
+    try:
+        result = await _scrape_xianyu(task_config, debug_limit, prefilter)
+        status = prefilter.exit_status
+        return result
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
+    finally:
+        prefilter.summary(status)
+
+
+async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: PrefilterRun):
     """
     【核心执行器】
     根据单个任务配置，异步爬取闲鱼商品数据，并对每个新发现的商品进行实时的、独立的AI分析和通知。
@@ -1018,12 +1033,15 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         unique_key = get_link_unique_key(item_data["商品链接"])
                         if unique_key in processed_links:
                             log_time(
-                                f"[页内进度 {i}/{total_items_on_page}] 商品 '{item_data['商品标题'][:20]}...' 已存在，跳过。"
+                                f"[页内进度 {i}/{total_items_on_page}] 商品 '{str(item_data.get('商品标题') or '')[:20]}...' 已存在，跳过。"
                             )
                             continue
 
+                        if prefilter.should_skip(item_data.get("商品标题"), page_num, i):
+                            continue
+
                         log_time(
-                            f"[页内进度 {i}/{total_items_on_page}] 发现新商品，获取详情: {item_data['商品标题'][:30]}..."
+                            f"[页内进度 {i}/{total_items_on_page}] 发现新商品，获取详情: {str(item_data.get('商品标题') or '')[:30]}..."
                         )
                         # --- 修改: 访问详情页前的等待时间，模拟用户在列表页上看了一会儿 ---
                         await random_sleep(2, 4)  # 原来是 (2, 4)
@@ -1209,6 +1227,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 raise
             except Exception as e:
                 if type(e).__name__ == "TargetClosedError":
+                    prefilter.exit_status = "interrupted"
                     log_time("浏览器已关闭，忽略后续异常（可能是任务被停止）。")
                     return processed_item_count
                 if "passport.goofish.com" in str(e):
@@ -1253,6 +1272,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         task_name_for_guard, cookie_path=pause_cookie_path
     )
     if decision.skip:
+        prefilter.exit_status = "paused"
         print(
             f"[FailureGuard] 任务 '{task_name_for_guard}' 已暂停重试 (连续失败 {decision.consecutive_failures}/{FAILURE_GUARD.threshold})"
         )
@@ -1316,6 +1336,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             print(f"IP 轮换：使用代理 {proxy_server}")
 
         try:
+            prefilter.attempts += 1
             processed_item_count += await _run_scrape_attempt(state_path, proxy_server)
             last_error = ""
             FAILURE_GUARD.record_success(task_name_for_guard)
@@ -1336,6 +1357,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 print("将尝试轮换账号/IP 后重试...")
 
     if last_error:
+        prefilter.exit_status = "failed"
         await _notify_task_failure(task_config, last_error, cookie_path=last_state_path)
 
     # 清理任务图片目录

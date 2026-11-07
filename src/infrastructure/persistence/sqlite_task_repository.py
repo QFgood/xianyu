@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import List, Optional
 
 from src.domain.models.task import Task
+from src.domain.models.prefilter import parse_stored_prefilter
 from src.domain.repositories.task_repository import TaskRepository
 from src.infrastructure.persistence.sqlite_bootstrap import bootstrap_sqlite_storage
 from src.infrastructure.persistence.sqlite_connection import sqlite_connection
@@ -21,6 +23,15 @@ def _row_to_task(row) -> Task:
     payload["free_shipping"] = bool(payload["free_shipping"])
     payload["is_running"] = bool(payload["is_running"])
     payload["keyword_rules"] = json.loads(payload.pop("keyword_rules_json") or "[]")
+    raw = payload.pop("prefilter_json", None)
+    try:
+        raw = json.loads(raw) if raw is not None else None
+    except (ValueError, TypeError, RecursionError) as exc:
+        logging.getLogger(__name__).warning(
+            "prefilter.config_invalid field=prefilter error=%s", type(exc).__name__
+        )
+        raw = None
+    payload["prefilter"] = parse_stored_prefilter(raw)
     return Task(**payload)
 
 
@@ -92,13 +103,13 @@ class SqliteTaskRepository(TaskRepository):
                     max_pages, personal_only, min_price, max_price, cron,
                     ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                     account_strategy, free_shipping, new_publish_option, region,
-                    decision_mode, keyword_rules_json, is_running
+                    decision_mode, keyword_rules_json, is_running, prefilter_json
                 ) VALUES (
                     :id, :task_name, :enabled, :keyword, :description, :analyze_images,
                     :max_pages, :personal_only, :min_price, :max_price, :cron,
                     :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
                     :account_strategy, :free_shipping, :new_publish_option, :region,
-                    :decision_mode, :keyword_rules_json, :is_running
+                    :decision_mode, :keyword_rules_json, :is_running, :prefilter_json
                 )
                 """,
                 payload,
@@ -128,5 +139,9 @@ class SqliteTaskRepository(TaskRepository):
         values["free_shipping"] = int(task.free_shipping)
         values["is_running"] = int(task.is_running)
         values["keyword_rules_json"] = json.dumps(task.keyword_rules or [], ensure_ascii=False)
+        policy = values.pop("prefilter")
+        values["prefilter_json"] = (
+            json.dumps(policy, ensure_ascii=False) if policy is not None else None
+        )
         values.pop("keyword_rules", None)
         return values
