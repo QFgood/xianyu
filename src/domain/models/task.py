@@ -8,6 +8,7 @@ from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.domain.models.prefilter import ListingPrefilterConfig
 from src.core.cron_utils import validate_cron_expression
 from src.services.account_strategy_service import (
     clean_account_state_file,
@@ -127,6 +128,7 @@ class Task(BaseModel):
     free_shipping: bool = True
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
+    prefilter: Optional[ListingPrefilterConfig] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
     is_running: bool = False
@@ -152,6 +154,8 @@ class Task(BaseModel):
     def apply_update(self, update: "TaskUpdate") -> "Task":
         """应用更新并返回新的任务实例"""
         update_data = update.model_dump(exclude_unset=True)
+        if "prefilter" in update.model_fields_set:
+            update_data["prefilter"] = update.prefilter
         return self.model_copy(update=update_data)
 
 
@@ -177,6 +181,7 @@ class TaskCreate(BaseModel):
     free_shipping: bool = True
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
+    prefilter: Optional[ListingPrefilterConfig] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
@@ -244,6 +249,7 @@ class TaskUpdate(BaseModel):
     free_shipping: Optional[bool] = None
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
+    prefilter: Optional[ListingPrefilterConfig] = None
     decision_mode: Optional[Literal["ai", "keyword"]] = None
     keyword_rules: Optional[List[str]] = None
     is_running: Optional[bool] = None
@@ -308,6 +314,7 @@ class TaskGenerateRequest(BaseModel):
     free_shipping: bool = True
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
+    prefilter: Optional[ListingPrefilterConfig] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
