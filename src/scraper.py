@@ -157,20 +157,25 @@ async def _notify_task_failure(
     keyword = task_config.get("keyword", "")
     formatted_reason = _format_failure_reason(reason)
 
-    # Some failures are deterministic misconfiguration and should pause/notify immediately.
+    # Explicit verification and deterministic misconfiguration need operator
+    # attention; pause immediately rather than probing the next scheduled run.
     pause_immediately = any(
         marker in formatted_reason
         for marker in (
             "未找到可用的代理地址",
             "未找到可用的登录状态文件",
+            "FAIL_SYS_USER_VALIDATE",
+            "baxia-dialog",
+            "J_MIDDLEWARE_FRAME_WIDGET",
         )
     )
 
+    effective_threshold = 1 if pause_immediately else FAILURE_GUARD.threshold
     guard_result = FAILURE_GUARD.record_failure(
         task_name,
         formatted_reason,
         cookie_path=cookie_path,
-        min_failures_to_pause=1 if pause_immediately else None,
+        min_failures_to_pause=effective_threshold,
     )
 
     if not guard_result.get("should_notify"):
@@ -190,7 +195,7 @@ async def _notify_task_failure(
         "商品链接": "#",
     }
     notify_reason = (
-        f"任务运行失败(已连续 {guard_result.get('consecutive_failures')}/{FAILURE_GUARD.threshold} 次): {formatted_reason}"
+        f"任务运行失败(已连续 {guard_result.get('consecutive_failures')}/{effective_threshold} 次): {formatted_reason}"
         f"\n任务: {task_name}"
         f"\n关键词: {keyword or 'N/A'}"
         f"\n已自动暂停重试，暂停到: {paused_until_str}"
@@ -1199,6 +1204,11 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                         "----------------------------------------------------"
                                     )
 
+                        except (RiskControlError, LoginRequiredError):
+                            # These terminate the whole attempt, not just this item.
+                            # Swallowing them here would keep requesting more details
+                            # after the platform explicitly requested verification.
+                            raise
                         except PlaywrightTimeoutError:
                             print(f"   错误: 访问商品详情页或等待API响应超时。")
                         except Exception as e:

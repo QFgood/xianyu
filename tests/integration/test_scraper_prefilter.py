@@ -31,6 +31,7 @@ def replay(monkeypatch, tmp_path):
     bootstrap_sqlite_storage(db, legacy_config_file=None, legacy_result_dir='/nonexistent', legacy_price_history_dir='/nonexistent')
     real_snapshots = scraper.record_market_snapshots
     real_save = scraper.save_to_jsonl
+    real_notify_failure = scraper._notify_task_failure
     state = tmp_path / 'state.json'
     state.write_text('{}')
     monkeypatch.setattr(scraper, 'STATE_FILE', str(state))
@@ -50,7 +51,7 @@ def replay(monkeypatch, tmp_path):
     monkeypatch.setattr(scraper, 'build_market_reference', lambda **kw: {})
 
     pages = []
-    current = {'page': 0, 'shared_seller': False}
+    current = {'page': 0, 'shared_seller': False, 'validation': False}
     cache_get = scraper.SellerProfileCache.get_or_load
     async def counted_get(cache, seller_id, loader):
         calls['seller_load'].append(seller_id)
@@ -76,6 +77,9 @@ def replay(monkeypatch, tmp_path):
                     return Response()
                 i = self.page.item_id
                 response = SimpleNamespace(ok=True)
+                if current['validation']:
+                    response.json = AsyncMock(return_value={'ret': ['FAIL_SYS_USER_VALIDATE:verification required']})
+                    return response
                 response.json = AsyncMock(return_value={'data': {'sellerDO': {'sellerId': 'seller-shared' if current['shared_seller'] else 'seller' + i}, 'itemDO': {'imageInfos': [{'url': 'image-' + i}]}}})
                 return response
             return get()
@@ -102,7 +106,8 @@ def replay(monkeypatch, tmp_path):
         async def click(self, *a, **kw):
             pass
         async def close(self):
-            pass
+            if not self.search:
+                calls['closed'].append(self.item_id)
 
     class Context:
         def __init__(self):
@@ -159,10 +164,11 @@ def replay(monkeypatch, tmp_path):
     for name, fn in [('scrape_user_profile', seller), ('download_all_images', images), ('get_ai_analysis', ai), ('save_to_jsonl', save), ('send_ntfy_notification', notify)]:
         monkeypatch.setattr(scraper, name, fn)
 
-    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai'):
+    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai', validation=False):
         pages[:] = copy.deepcopy(data or [[item(i, title) for i, title in enumerate(TITLES)]])
         current['page'] = 0
         current['shared_seller'] = shared_seller
+        current['validation'] = validation
         config = dict(keyword='offline', task_name='offline', max_pages=len(pages), account_strategy='fixed', account_state_file=str(state), personal_only=False, free_shipping=False, ai_prompt_text='original prompt with unchanged criteria', decision_mode=decision_mode, keyword_rules=['mac'], analyze_images=True, prefilter=POLICY | {'mode': mode})
         if source:
             import spider_v2
@@ -192,6 +198,7 @@ def replay(monkeypatch, tmp_path):
             asyncio.run(spider_v2.main())
             return len(calls['detail'])
         return asyncio.run(scraper.scrape_xianyu(config, debug_limit))
+    run.notify_failure = real_notify_failure
     return run, calls
 
 
@@ -327,3 +334,31 @@ def test_original_scrape_errors_and_retries_have_one_failed_summary(replay, monk
     assert summary['evaluated'] == 0
     failure_notification.assert_awaited_once()
     assert not calls['detail']
+
+
+def test_detail_validation_stops_attempt_and_pauses_next_run(replay, monkeypatch, tmp_path, capsys):
+    import src.scraper as scraper
+    from src.failure_guard import FailureGuard
+
+    guard = FailureGuard(str(tmp_path / 'guard.json'), threshold=3, pause_seconds=86400)
+    monkeypatch.setattr(scraper, 'FAILURE_GUARD', guard)
+    # Use the real failure recorder, replacing only its notification transport.
+    run, calls = replay
+    monkeypatch.setattr(scraper, '_notify_task_failure', run.notify_failure)
+    notifier = AsyncMock()
+    monkeypatch.setattr(scraper, 'send_ntfy_notification', notifier)
+    data = [[item(0, 'Mac mini M6'), item(1, 'Mac mini M6')], [item(2, 'Mac mini M6')]]
+    assert run('shadow', data=data, validation=True) == 0
+    assert calls['detail'] == ['0']
+    assert calls['closed'] == ['0']
+    assert not calls['pagination']
+    for key in ('seller', 'images', 'ai', 'saved', 'notified'):
+        assert not calls[key]
+    summary = json.loads(capsys.readouterr().out.split('prefilter.summary ')[1].splitlines()[0])
+    assert summary['status'] == 'failed'
+    assert summary['attempts'] == 1
+    assert guard.should_skip_start('offline').skip
+    notifier.assert_awaited_once()
+    assert run('shadow', data=data, validation=True) == 0
+    assert calls['detail'] == ['0']
+    assert '"status": "paused"' in capsys.readouterr().out
