@@ -17,6 +17,8 @@ class MarketClassification(BaseModel):
     chip: str | None = None
     memory_gb: StrictInt | None = None
     storage_gb: StrictInt | None = None
+    cpu_cores: StrictInt | None = None
+    gpu_cores: StrictInt | None = None
     identity_evidence: str = Field(default='', max_length=1000)
     evidence_source: Literal['text', 'image', 'unknown'] = 'unknown'
 
@@ -40,7 +42,9 @@ def build_market_prompt(task: dict) -> str:
     from src.domain.models.market_target import MarketTarget
     import json
     template += '\n必须逐项核对的结构化目标：' + json.dumps(asdict(MarketTarget.from_task(task)), ensure_ascii=False)
-    return template.replace('{{TARGET}}', str(task.get('task_name') or task['keyword'])).replace(
+    from src.domain.models.product_selection import ProductSelection
+    selected_label = ProductSelection.model_validate(task['product_selection']).label() if task.get('product_selection') else str(task.get('task_name') or task['keyword'])
+    return template.replace('{{TARGET}}', selected_label).replace(
         '{{DESCRIPTION}}', str(task.get('description') or task['keyword']))
 
 

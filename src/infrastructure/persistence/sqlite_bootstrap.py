@@ -84,8 +84,8 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
                 max_pages, personal_only, min_price, max_price, cron,
                 ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                 account_strategy, free_shipping, new_publish_option, region,
-                decision_mode, keyword_rules_json, is_running, prefilter_json, monitor_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                decision_mode, keyword_rules_json, is_running, prefilter_json, monitor_mode, product_selection_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 index,
@@ -111,6 +111,7 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
                 _as_int(raw_task.get("is_running", False)),
                 policy.model_dump_json() if policy is not None else None,
                 raw_task.get("monitor_mode", "market"),
+                json.dumps(raw_task["product_selection"], ensure_ascii=False) if raw_task.get("product_selection") else None,
             ),
         )
     _mark_bootstrap_completed(conn, TASKS_BOOTSTRAP_KEY)

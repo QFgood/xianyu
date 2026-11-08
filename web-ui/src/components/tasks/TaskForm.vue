@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import ProductCatalogPicker from '@/components/tasks/ProductCatalogPicker.vue'
 import TaskRegionSelector from '@/components/tasks/TaskRegionSelector.vue'
 
 type FormMode = 'create' | 'edit'
@@ -35,6 +36,12 @@ onMounted(async () => {
   try { remoteBrowser.value = (await getBrowserStatus()).enabled } catch { /* existing local deployments */ }
 })
 const form = ref<any>({})
+const catalogPending = ref(false)
+function applyCatalogSelection(value: { selection: object; name: string; keyword: string }) {
+  form.value.product_selection = value.selection
+  form.value.task_name = value.name
+  form.value.keyword = value.keyword
+}
 const accountStrategy = ref<'auto' | 'fixed' | 'rotate'>('auto')
 const selectedAccountStateFile = ref(AUTO_ACCOUNT_VALUE)
 const keywordRulesInput = ref('')
@@ -198,6 +205,11 @@ function handleSubmit() {
     return
   }
 
+  if (!form.value.product_selection || catalogPending.value) {
+    toast({ title: '请选择准确商品', description: '先从商品库确认型号、内存和内置SSD，再提交任务。', variant: 'destructive' })
+    return
+  }
+
   const decisionMode = form.value.decision_mode || 'ai'
   if (form.value.monitor_mode === 'buying' && decisionMode === 'ai' && !String(form.value.description || '').trim()) {
     toast({
@@ -266,6 +278,7 @@ function handleSubmit() {
 <template>
   <form id="task-form" @submit.prevent="handleSubmit">
     <div class="grid gap-6 py-4">
+      <ProductCatalogPicker v-model="form.product_selection" @selected="applyCatalogSelection" @pending="catalogPending = $event" />
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="task-name" class="sm:text-right">{{ t('tasks.form.taskName') }}</Label>
         <Input id="task-name" v-model="form.task_name" class="sm:col-span-3" :placeholder="t('tasks.form.taskNamePlaceholder')" required />

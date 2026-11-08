@@ -165,6 +165,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
     if "prefilter_json" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN prefilter_json TEXT")
+    if "product_selection_json" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN product_selection_json TEXT")
     if "monitor_mode" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN monitor_mode TEXT NOT NULL DEFAULT 'market'")
     _migrate_result_items_status(conn)

@@ -226,7 +226,8 @@ def test_market_creation_and_edit_do_not_generate_buying_prompt(api_client, monk
     monkeypatch.setattr('src.api.routes.tasks.generate_criteria', forbidden)
     monkeypatch.setattr('src.services.task_generation_runner.generate_criteria', forbidden)
     response = api_client.post('/api/tasks/generate', json={
-        'task_name':'Mac mini M6 16GB 256GB', 'keyword':'Mac mini M6', 'description':'16GB+256GB内置SSD'})
+        'task_name':'Mac mini M6 16GB 256GB', 'keyword':'Mac mini M6', 'description':'16GB+256GB内置SSD',
+        'product_selection':{'catalog_id':'apple-mac-mini-m6','memory_gb':16,'storage_gb':256}} )
     assert response.status_code == 200
     task = response.json()['task']
     assert task['monitor_mode'] == 'market'

@@ -26,9 +26,18 @@ class MarketTarget:
     chip: str | None = None
     memory_gb: int | None = None
     storage_gb: int | None = None
+    cpu_cores: int | None = None
+    gpu_cores: int | None = None
 
     @classmethod
     def from_task(cls, task):
+        selection = task.get('product_selection')
+        if selection:
+            from src.domain.models.product_selection import ProductSelection, find_product
+            selected = ProductSelection.model_validate(selection)
+            product = find_product(selected.catalog_id)
+            return cls(product['product_family'], chip_name(product['chip']), selected.memory_gb,
+                       selected.storage_gb, product['cpu_cores'], product['gpu_cores'])
         # Task name is the primary identity. Description fills missing constraints.
         name = normalize(task.get('task_name') or task.get('keyword'))
         name = re.sub(r'(?<![a-z])mac\s*mini', 'mac mini ', name)
@@ -78,12 +87,12 @@ class MarketTarget:
             return result
         actual = dict(product_family=normalize(result.get('product_family')),
                       chip=chip_name(result.get('chip')), memory_gb=result.get('memory_gb'),
-                      storage_gb=result.get('storage_gb'))
-        for key in ('product_family', 'chip', 'memory_gb', 'storage_gb'):
+                      storage_gb=result.get('storage_gb'), cpu_cores=result.get('cpu_cores'), gpu_cores=result.get('gpu_cores'))
+        for key in ('product_family', 'chip', 'memory_gb', 'storage_gb', 'cpu_cores', 'gpu_cores'):
             target = getattr(self, key)
             if target is None:
                 continue
-            label = {'product_family':'商品品类','chip':'芯片型号','memory_gb':'内存容量','storage_gb':'内置硬盘容量'}[key]
+            label = {'product_family':'商品品类','chip':'芯片型号','memory_gb':'内存容量','storage_gb':'内置硬盘容量','cpu_cores':'CPU核心数','gpu_cores':'GPU核心数'}[key]
             observed = actual[key]
             if observed is None or observed == '':
                 result.update(match_status='unknown', reason=f'出售商品的{label}证据不足，不计入目标行情')

@@ -93,7 +93,7 @@ async def generate_task(
     scheduler_service: SchedulerService = Depends(get_scheduler_service),
     generation_service: TaskGenerationService = Depends(get_task_generation_service),
 ):
-    """创建任务。AI模式会生成分析标准，关键词模式直接保存规则。"""
+    """创建行情任务；显式 buying 模式保留旧分析标准生成流程。"""
     print(f"收到任务生成请求: {req.task_name}，模式: {req.decision_mode}")
 
     try:
@@ -152,6 +152,9 @@ async def update_task(
         if not existing_task:
             raise HTTPException(status_code=404, detail="任务未找到")
         _validate_final_account_strategy(existing_task, task_update)
+        if ('product_selection' in task_update.model_fields_set and task_update.product_selection is None
+                and existing_task.product_selection and (task_update.monitor_mode or existing_task.monitor_mode) == 'market'):
+            raise HTTPException(status_code=400, detail='请选择新的商品配置，不能清空已绑定的行情目标。')
 
         current_mode = getattr(existing_task, "decision_mode", "ai") or "ai"
         target_mode = task_update.decision_mode or current_mode

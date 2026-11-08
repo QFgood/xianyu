@@ -38,11 +38,17 @@ class MarketRun:
         # Keep changed search scopes / target / prompt revisions out of comparisons.
         scope_keys = ('keyword', 'task_name', 'description', 'max_pages', 'min_price', 'max_price',
                       'personal_only', 'free_shipping', 'new_publish_option', 'region',
-                      'prefilter', 'decision_mode', 'keyword_rules', 'analyze_images')
+                      'prefilter', 'product_selection', 'decision_mode', 'keyword_rules', 'analyze_images')
         scope = {key: task.get(key) for key in scope_keys}
         self.task_key = str(task.get('id') if task.get('id') is not None else task['task_name'])
         scope.update(task_key=self.task_key, prompt=self.prompt, version=2)
         self.cohort = hashlib.sha256(json.dumps(scope, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+    def prompt_target_label(self):
+        if self.task.get('product_selection'):
+            from src.domain.models.product_selection import ProductSelection
+            return ProductSelection.model_validate(self.task['product_selection']).label()
+        return self.task.get('description') or self.task['keyword']
 
     def fail(self, reason):
         self.errors.append(reason)
@@ -77,7 +83,8 @@ class MarketRun:
         report = dict(run_id=self.run_id, task_key=self.task_key, cohort=self.cohort,
                       task_name=self.task['task_name'], created_at=datetime.now(timezone.utc).isoformat(),
                       status='complete' if complete else 'partial', errors=sorted(set(self.errors)),
-                      target=self.task.get('description') or self.task['keyword'],
+                      target=self.prompt_target_label(),
+                      product_selection=self.task.get('product_selection'),
                       title_rejected=self.title_rejected,
                       scope={k: self.task.get(k) for k in ('keyword','max_pages','min_price','max_price','region','personal_only','free_shipping','new_publish_option')},
                       summary=summarize(samples),

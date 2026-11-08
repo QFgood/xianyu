@@ -4,11 +4,12 @@
 补充目标说明：{{DESCRIPTION}}
 说明可能遗留购买画像：只提取型号、芯片、内存、内置存储、地区版本等产品规格，不执行卖家画像、砍价、信用门槛或推荐购买要求。
 必须识别正在出售的商品，不是文中提到的所有型号。例如“MacBook Air M4 16+256，因换M6 Mac mini故出”出售品是MacBook Air M4；“Mac mini M4，与M6相比”仍是M4。Mac mini和MacBook不是同一品类。M6、M6 Pro、M6 Max、M6 Ultra是不同芯片型号，不能互相替代。
+结构化商品库选择是最高优先级，任务名称与补充描述不可覆盖它。CPU/GPU核心数如果结构化目标为null不限制；如果有值，需逐项核对，无法确定用null。对同芯片只有一个官方CPU/GPU组合的标准版，可由该确切芯片的官方规格确认；Pro等存在多种核心组合时必须有出售品的对应证据，不猜测。
 芯片代际是独立的必需条件：内存硬盘匹配不能补偿芯片不匹配。只出现M6关键词但无法证明是出售品芯片时为unknown。除match_status外，必须提取出售品的product_family、chip、memory_gb、storage_gb；不明用null，不得照抄目标值。product_family对Mac mini统一输出"mac mini"，其他品类按实际名称。
 identity_evidence应引用证明出售品身份的原文片段，不截掉“换购、因换、不是”等上下文；evidence_source为text。仅系统配置截图能证明时为image，引文写图中实际文字；无法确认时unknown。
 逐项核对目标配置；不要凭市场常识猜测商品配置、发布时间、真伪或成交价。内存、内置硬盘与外置扩展不可混淆。仅标题命中而正文/图片冲突时不能算匹配。
 配置或当前标价对应的SKU不明时为 unknown。定金、配件、求购、回收、租赁、多配置起售价不作为目标整机标价。仅纳入全新(new)、几乎全新(like_new)、轻微痕迹(light_wear)三个成色档。全新必须有未使用依据；仅“99新”或已使用但近乎无痕为几乎全新；轻微划痕/正常轻度使用痕迹为轻微痕迹。明显磕碰、重划痕、严重磨损为worn，不纳入。故障/无法开机/功能异常为faulty，不纳入。成色不能确认用unknown，不凭价格猜测。
 另提取functional_status：有明确正常使用/功能正常依据时为normal；故障/缺失重要功能为faulty；不明为unknown。不能因卖家说“几乎全新”就忽略正文故障。故障、功能不明、成色不明一律不作为有效行情样本。
 只输出JSON：
-{"match_status":"match|no_match|unknown","price_kind":"whole_unit|deposit|accessory|option_min|not_sale|unknown","condition":"new|like_new|light_wear|worn|faulty|unknown","functional_status":"normal|faulty|unknown","product_family":"mac mini 或实际品类 或 null","chip":"M6 或实际芯片 或 null","memory_gb":16,"storage_gb":256,"identity_evidence":"出售品身份依据原文","evidence_source":"text|image|unknown","model":"商品配置简述","reason":"简短的配置与报价依据"}
+{"match_status":"match|no_match|unknown","price_kind":"whole_unit|deposit|accessory|option_min|not_sale|unknown","condition":"new|like_new|light_wear|worn|faulty|unknown","functional_status":"normal|faulty|unknown","product_family":"mac mini 或实际品类 或 null","chip":"M6 或实际芯片 或 null","cpu_cores":12,"gpu_cores":12,"memory_gb":16,"storage_gb":256,"identity_evidence":"出售品身份依据原文","evidence_source":"text|image|unknown","model":"商品配置简述","reason":"简短的配置与报价依据"}
 不输出is_recommended、性价比分数或购买建议。不要创造未给出的证据。

@@ -41,7 +41,7 @@ onUnmounted(() => clearInterval(timer))
     </header>
     <p v-if="error" role="alert" class="text-red-600">{{ error }}</p>
     <div v-if="!reports.length && !loading" class="rounded-xl border bg-white p-8 space-y-3">
-      <h2 class="font-semibold">等待第一轮行情采样</h2><p class="text-slate-500">在任务管理中填写目标型号、内存和内置硬盘，运行任务后将在这里展示。历史购买推荐不会作为行情样本。</p>
+      <h2 class="font-semibold">等待第一轮行情采样</h2><p class="text-slate-500">在任务管理中从商品库选择准确型号、内存和内置硬盘，运行任务后将在这里展示。历史购买推荐不会作为行情样本。</p>
       <RouterLink to="/tasks" class="inline-block text-blue-600">前往任务管理 →</RouterLink>
     </div>
     <template v-if="current">
