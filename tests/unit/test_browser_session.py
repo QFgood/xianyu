@@ -28,13 +28,15 @@ def test_manual_state_survives_restart_and_uses_exclusive_lease(tmp_path):
     assert control.require_help('task-b', 'other') == incident
     assert control.claim_notification()
     assert not control.claim_notification()
-    control.record_notification(False)
+    control.record_notification(incident['incident_id'], False)
     assert control.read()['notification'] == 'failed'
     with pytest.raises(BrowserStateConflict):
         control.acknowledge(first['incident_id'])
     ready = control.acknowledge(incident['incident_id'])
     assert ready['state'] == 'ready'
     assert ready['incident_id'] != incident['incident_id']
+    control.record_notification(incident['incident_id'], True)
+    assert control.read()['notification'] == 'not_requested'
     assert control.pause(ready['incident_id'])['state'] == 'needs_login'
 
 

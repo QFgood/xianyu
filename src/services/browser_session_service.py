@@ -101,16 +101,21 @@ class BrowserSessionControl:
             return dict(state)
         return self._update(update)
 
-    def claim_notification(self) -> bool:
+    def claim_notification(self) -> dict | None:
         def update(state):
             if state.get('notification') != 'pending':
-                return False
+                return None
             state['notification'] = 'sending'
-            return True
+            return dict(state)
         return self._update(update)
 
-    def record_notification(self, success: bool):
-        self._update(lambda state: state.update(notification='sent' if success else 'failed'))
+    def record_notification(self, incident_id: str, success: bool):
+        def update(state):
+            # A slow notification must not overwrite a newer human confirmation
+            # or a later verification incident.
+            if state['incident_id'] == incident_id and state.get('notification') == 'sending':
+                state['notification'] = 'sent' if success else 'failed'
+        self._update(update)
 
     def acknowledge(self, incident_id: str) -> dict:
         def update(state):
@@ -180,11 +185,11 @@ class RemoteValidationWatch:
 
 async def notify_browser_handoff(control: BrowserSessionControl):
     """One enterprise WeChat notification per incident, no cookie/verification URL."""
-    if not await asyncio.to_thread(control.claim_notification):
+    state = await asyncio.to_thread(control.claim_notification)
+    if not state:
         return
     try:
         from src.services.notification_service import build_notification_service
-        state = await asyncio.to_thread(control.read)
         service = build_notification_service()
         service.clients = [client for client in service.clients if client.channel_key == 'wecom']
         entry = public_browser_url()
@@ -197,5 +202,5 @@ async def notify_browser_handoff(control: BrowserSessionControl):
     except Exception:
         # Never include webhook credentials or remote exception payloads in logs.
         success = False
-    await asyncio.to_thread(control.record_notification, success)
+    await asyncio.to_thread(control.record_notification, state['incident_id'], success)
     print('browser.handoff_notification ' + ('sent' if success else 'failed_or_not_configured'))
