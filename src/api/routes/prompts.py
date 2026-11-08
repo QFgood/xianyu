@@ -31,6 +31,8 @@ class PromptUpdate(BaseModel):
 @router.get("")
 async def list_prompts():
     """列出所有 prompt 文件"""
+    from src.services.market_analysis_service import ensure_market_prompt
+    ensure_market_prompt()
     if not _PROMPTS_DIR.is_dir():
         return []
     return [f for f in os.listdir(_PROMPTS_DIR) if f.endswith(".txt")]

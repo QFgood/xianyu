@@ -16,6 +16,10 @@ from src.infrastructure.persistence.storage_names import DEFAULT_DATABASE_PATH
 BUSY_TIMEOUT_MS = 5000
 
 SCHEMA_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS market_reports (
+        run_id TEXT PRIMARY KEY, task_key TEXT NOT NULL, cohort TEXT NOT NULL,
+        created_at TEXT NOT NULL, payload TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_market_task_time ON market_reports(task_key, created_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS app_metadata (
         key TEXT PRIMARY KEY,
@@ -161,6 +165,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
     if "prefilter_json" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN prefilter_json TEXT")
+    if "product_selection_json" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN product_selection_json TEXT")
+    if "monitor_mode" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN monitor_mode TEXT NOT NULL DEFAULT 'market'")
     _migrate_result_items_status(conn)
     conn.commit()
 

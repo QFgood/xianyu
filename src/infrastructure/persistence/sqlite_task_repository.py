@@ -22,6 +22,8 @@ def _row_to_task(row) -> Task:
     payload["personal_only"] = bool(payload["personal_only"])
     payload["free_shipping"] = bool(payload["free_shipping"])
     payload["is_running"] = bool(payload["is_running"])
+    raw_selection = payload.pop("product_selection_json", None)
+    payload["product_selection"] = json.loads(raw_selection) if raw_selection else None
     payload["keyword_rules"] = json.loads(payload.pop("keyword_rules_json") or "[]")
     raw = payload.pop("prefilter_json", None)
     try:
@@ -103,13 +105,13 @@ class SqliteTaskRepository(TaskRepository):
                     max_pages, personal_only, min_price, max_price, cron,
                     ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                     account_strategy, free_shipping, new_publish_option, region,
-                    decision_mode, keyword_rules_json, is_running, prefilter_json
+                    decision_mode, keyword_rules_json, is_running, prefilter_json, monitor_mode, product_selection_json
                 ) VALUES (
                     :id, :task_name, :enabled, :keyword, :description, :analyze_images,
                     :max_pages, :personal_only, :min_price, :max_price, :cron,
                     :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
                     :account_strategy, :free_shipping, :new_publish_option, :region,
-                    :decision_mode, :keyword_rules_json, :is_running, :prefilter_json
+                    :decision_mode, :keyword_rules_json, :is_running, :prefilter_json, :monitor_mode, :product_selection_json
                 )
                 """,
                 payload,
@@ -139,6 +141,8 @@ class SqliteTaskRepository(TaskRepository):
         values["free_shipping"] = int(task.free_shipping)
         values["is_running"] = int(task.is_running)
         values["keyword_rules_json"] = json.dumps(task.keyword_rules or [], ensure_ascii=False)
+        selection = values.pop("product_selection")
+        values["product_selection_json"] = json.dumps(selection, ensure_ascii=False) if selection else None
         policy = values.pop("prefilter")
         values["prefilter_json"] = (
             json.dumps(policy, ensure_ascii=False) if policy is not None else None

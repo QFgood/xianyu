@@ -22,6 +22,8 @@ def build_criteria_filename(keyword: str) -> str:
 def build_task_create(req: TaskGenerateRequest, criteria_file: str) -> TaskCreate:
     return TaskCreate(
         task_name=req.task_name,
+        monitor_mode=req.monitor_mode,
+        product_selection=req.product_selection,
         enabled=True,
         keyword=req.keyword,
         description=req.description or "",

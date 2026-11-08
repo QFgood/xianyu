@@ -93,12 +93,12 @@ async def generate_task(
     scheduler_service: SchedulerService = Depends(get_scheduler_service),
     generation_service: TaskGenerationService = Depends(get_task_generation_service),
 ):
-    """创建任务。AI模式会生成分析标准，关键词模式直接保存规则。"""
+    """创建行情任务；显式 buying 模式保留旧分析标准生成流程。"""
     print(f"收到任务生成请求: {req.task_name}，模式: {req.decision_mode}")
 
     try:
         mode = req.decision_mode or "ai"
-        if mode == "ai":
+        if mode == "ai" and req.monitor_mode == "buying":
             job = await generation_service.create_job(req.task_name)
             generation_service.track(
                 run_ai_generation_job(
@@ -152,6 +152,9 @@ async def update_task(
         if not existing_task:
             raise HTTPException(status_code=404, detail="任务未找到")
         _validate_final_account_strategy(existing_task, task_update)
+        if ('product_selection' in task_update.model_fields_set and task_update.product_selection is None
+                and existing_task.product_selection and (task_update.monitor_mode or existing_task.monitor_mode) == 'market'):
+            raise HTTPException(status_code=400, detail='请选择新的商品配置，不能清空已绑定的行情目标。')
 
         current_mode = getattr(existing_task, "decision_mode", "ai") or "ai"
         target_mode = task_update.decision_mode or current_mode
@@ -169,7 +172,7 @@ async def update_task(
             )
             if not _has_keyword_rules(final_rules):
                 raise HTTPException(status_code=400, detail="关键词模式下至少需要一个关键词。")
-        if target_mode == "ai" and (description_changed or switched_to_ai):
+        if (task_update.monitor_mode or existing_task.monitor_mode) == "buying" and target_mode == "ai" and (description_changed or switched_to_ai):
             print(f"检测到任务 {task_id} 需要刷新 AI 标准文件，开始重新生成...")
             try:
                 description_for_ai = (

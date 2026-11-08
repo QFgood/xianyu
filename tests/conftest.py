@@ -116,6 +116,9 @@ def api_context(tmp_path):
 
     app = FastAPI()
     app.include_router(tasks.router)
+    from src.api.routes import market, catalog
+    app.include_router(market.router)
+    app.include_router(catalog.router)
 
     def override_get_task_service():
         return task_service

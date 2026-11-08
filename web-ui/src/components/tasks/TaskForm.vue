@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import ProductCatalogPicker from '@/components/tasks/ProductCatalogPicker.vue'
 import TaskRegionSelector from '@/components/tasks/TaskRegionSelector.vue'
 
 type FormMode = 'create' | 'edit'
@@ -35,9 +36,16 @@ onMounted(async () => {
   try { remoteBrowser.value = (await getBrowserStatus()).enabled } catch { /* existing local deployments */ }
 })
 const form = ref<any>({})
+const catalogPending = ref(false)
+function applyCatalogSelection(value: { selection: object; name: string; keyword: string }) {
+  form.value.product_selection = value.selection
+  form.value.task_name = value.name
+  form.value.keyword = value.keyword
+  form.value.decision_mode = 'ai'
+  form.value.keyword_rules = []
+}
 const accountStrategy = ref<'auto' | 'fixed' | 'rotate'>('auto')
 const selectedAccountStateFile = ref(AUTO_ACCOUNT_VALUE)
-const keywordRulesInput = ref('')
 const cronMode = ref<'preset' | 'custom'>('preset')
 
 // 常用 cron 预设选项
@@ -81,22 +89,6 @@ const accountStrategyOptions = computed(() => [
   { value: 'rotate', label: t('tasks.form.accountStrategy.rotate'), description: t('tasks.form.accountStrategy.rotateDescription') },
 ])
 
-function parseKeywordText(text: string): string[] {
-  const values = String(text || '')
-    .split(/[\n,]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-
-  const seen = new Set<string>()
-  const deduped: string[] = []
-  for (const value of values) {
-    const key = value.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    deduped.push(value)
-  }
-  return deduped
-}
 
 watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAccount], () => {
   const defaultValues = props.defaultValues || {}
@@ -119,7 +111,6 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       region: defaultValues.region || props.initialData.region || '',
       decision_mode: defaultValues.decision_mode || props.initialData.decision_mode || 'ai',
     }
-    keywordRulesInput.value = (defaultValues.keyword_rules || props.initialData.keyword_rules || []).join('\n')
     // 编辑模式下，根据 cron 值判断模式
     const cronVal = defaultValues.cron ?? props.initialData.cron ?? ''
     cronMode.value = isPresetCronValue(cronVal) ? 'preset' : 'custom'
@@ -130,13 +121,13 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       description: '',
       analyze_images: true,
       max_pages: 3,
-      personal_only: true,
+      personal_only: false,
       min_price: undefined,
       max_price: undefined,
       cron: '',
       account_strategy: props.defaultAccount ? 'fixed' : 'auto',
       account_state_file: props.defaultAccount || AUTO_ACCOUNT_VALUE,
-      free_shipping: true,
+      free_shipping: false,
       new_publish_option: '__none__',
       region: '',
       decision_mode: 'ai',
@@ -150,10 +141,6 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
     }
     if (!form.value.new_publish_option) {
       form.value.new_publish_option = '__none__'
-    }
-    keywordRulesInput.value = ''
-    if (defaultValues.keyword_rules && defaultValues.keyword_rules.length > 0) {
-      keywordRulesInput.value = defaultValues.keyword_rules.join('\n')
     }
     // 创建模式下，根据默认值判断模式
     const cronVal = defaultValues.cron ?? ''
@@ -189,7 +176,7 @@ function handleAccountStateFileChange(event: Event) {
 }
 
 function handleSubmit() {
-  if (!form.value.task_name || !form.value.keyword) {
+  if (!String(form.value.task_name || '').trim()) {
     toast({
       title: t('tasks.form.validation.incomplete'),
       description: t('tasks.form.validation.nameAndKeywordRequired'),
@@ -198,23 +185,8 @@ function handleSubmit() {
     return
   }
 
-  const decisionMode = form.value.decision_mode || 'ai'
-  if (decisionMode === 'ai' && !String(form.value.description || '').trim()) {
-    toast({
-      title: t('tasks.form.validation.incomplete'),
-      description: t('tasks.form.validation.aiDescriptionRequired'),
-      variant: 'destructive',
-    })
-    return
-  }
-
-  const keywordRules = parseKeywordText(keywordRulesInput.value)
-  if (decisionMode === 'keyword' && keywordRules.length === 0) {
-    toast({
-      title: t('tasks.form.validation.keywordRuleIncomplete'),
-      description: t('tasks.form.validation.keywordRuleRequired'),
-      variant: 'destructive',
-    })
+  if (!form.value.product_selection || catalogPending.value) {
+    toast({ title: '请选择准确商品', description: '先从商品库确认型号、内存和内置SSD，再提交任务。', variant: 'destructive' })
     return
   }
 
@@ -250,13 +222,11 @@ function handleSubmit() {
     submitData.new_publish_option = ''
   }
 
-  submitData.decision_mode = decisionMode
+  submitData.monitor_mode = 'market'
+  submitData.decision_mode = 'ai'
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
-  submitData.keyword_rules = decisionMode === 'keyword' ? keywordRules : []
-  if (decisionMode === 'keyword' && !submitData.description) {
-    submitData.description = ''
-  }
+  submitData.keyword_rules = []
 
   emit('submit', submitData)
 }
@@ -265,28 +235,12 @@ function handleSubmit() {
 <template>
   <form id="task-form" @submit.prevent="handleSubmit">
     <div class="grid gap-6 py-4">
+      <ProductCatalogPicker v-model="form.product_selection" @selected="applyCatalogSelection" @pending="catalogPending = $event" />
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="task-name" class="sm:text-right">{{ t('tasks.form.taskName') }}</Label>
         <Input id="task-name" v-model="form.task_name" class="sm:col-span-3" :placeholder="t('tasks.form.taskNamePlaceholder')" required />
       </div>
-      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-        <Label for="keyword" class="sm:text-right">{{ t('tasks.form.keyword') }}</Label>
-        <Input id="keyword" v-model="form.keyword" class="sm:col-span-3" :placeholder="t('tasks.form.keywordPlaceholder')" required />
-      </div>
-      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-        <Label class="sm:text-right">{{ t('tasks.form.decisionMode') }}</Label>
-        <div class="sm:col-span-3">
-          <Select v-model="form.decision_mode">
-            <SelectTrigger>
-              <SelectValue :placeholder="t('tasks.form.decisionModePlaceholder')" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ai">{{ t('tasks.form.aiMode') }}</SelectItem>
-              <SelectItem value="keyword">{{ t('tasks.form.keywordMode') }}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      <p v-if="form.product_selection" class="text-xs text-slate-500">闲鱼搜索词：{{ form.keyword }}（由所选型号自动生成）</p>
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="description" class="sm:text-right">{{ t('tasks.form.description') }}</Label>
         <div class="space-y-1 sm:col-span-3">
@@ -295,32 +249,15 @@ function handleSubmit() {
             v-model="form.description"
             :placeholder="t('tasks.form.descriptionPlaceholder')"
           />
-          <p v-if="form.decision_mode === 'keyword'" class="text-xs text-gray-500">
-            {{ t('tasks.form.keywordDescriptionHint') }}
-          </p>
         </div>
       </div>
-      <div v-if="form.decision_mode === 'ai'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="analyze-images" class="sm:text-right">{{ t('tasks.form.analyzeImages') }}</Label>
         <div class="space-y-1 sm:col-span-3">
           <Switch id="analyze-images" v-model="form.analyze_images" />
           <p class="text-xs text-gray-500">
             {{ t('tasks.form.analyzeImagesHint') }}
           </p>
-        </div>
-      </div>
-
-      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
-        <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.keywordRules') }}</Label>
-        <div class="space-y-2 sm:col-span-3">
-          <p class="text-xs text-gray-500">
-            {{ t('tasks.form.keywordRulesHint') }}
-          </p>
-          <Textarea
-            v-model="keywordRulesInput"
-            class="min-h-[120px]"
-            :placeholder="t('tasks.form.keywordRulesPlaceholder')"
-          />
         </div>
       </div>
 

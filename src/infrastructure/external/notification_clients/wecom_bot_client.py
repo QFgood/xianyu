@@ -23,13 +23,23 @@ class WeComBotClient(NotificationClient):
         if not self.is_enabled():
             raise RuntimeError("企业微信 未启用")
 
-        message = self._build_message(product_data, reason)
-        markdown_lines = [f"## {message.notification_title}", ""]
-        markdown_lines.append(f"- 价格: {message.price}")
-        markdown_lines.append(f"- 原因: {message.reason}")
-        if message.mobile_link:
-            markdown_lines.append(f"- 手机端链接: [{message.mobile_link}]({message.mobile_link})")
-        markdown_lines.append(f"- 电脑端链接: [{message.desktop_link}]({message.desktop_link})")
+        report = product_data.get('market_report')
+        if report:
+            import re
+            safe_name = re.sub(r'[\[\]()*#<>`\r\n]', '', report['task_name'])[:80]
+            markdown_lines = [f"## 行情更新 | {safe_name}", "", reason]
+            for sample in report['samples'][:3]:
+                # Use a short canonical URL and short anchor; no tracking/share query text.
+                if str(sample['item_id']).isdigit():
+                    markdown_lines.append(f"[样本 ¥{sample['price']:g}](https://www.goofish.com/item?id={sample['item_id']})")
+        else:
+            message = self._build_message(product_data, reason)
+            markdown_lines = [f"## {message.notification_title}", ""]
+            markdown_lines.append(f"- 价格: {message.price}")
+            markdown_lines.append(f"- 原因: {message.reason}")
+            if message.mobile_link:
+                markdown_lines.append(f"- 手机端链接: [{message.mobile_link}]({message.mobile_link})")
+            markdown_lines.append(f"- 电脑端链接: [{message.desktop_link}]({message.desktop_link})")
         payload = {
             "msgtype": "markdown",
             "markdown": {"content": "\n".join(markdown_lines)},

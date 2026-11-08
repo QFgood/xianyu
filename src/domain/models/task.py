@@ -8,6 +8,7 @@ from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.domain.models.product_selection import ProductSelection
 from src.domain.models.prefilter import ListingPrefilterConfig
 from src.core.cron_utils import validate_cron_expression
 from src.services.account_strategy_service import (
@@ -125,10 +126,12 @@ class Task(BaseModel):
     ai_prompt_criteria_file: str
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"
-    free_shipping: bool = True
+    free_shipping: bool = False
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
     prefilter: Optional[ListingPrefilterConfig] = None
+    product_selection: Optional[ProductSelection] = None
+    monitor_mode: Literal["market", "buying"] = "market"
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
     is_running: bool = False
@@ -154,6 +157,8 @@ class Task(BaseModel):
     def apply_update(self, update: "TaskUpdate") -> "Task":
         """应用更新并返回新的任务实例"""
         update_data = update.model_dump(exclude_unset=True)
+        if "product_selection" in update.model_fields_set:
+            update_data["product_selection"] = update.product_selection
         if "prefilter" in update.model_fields_set:
             update_data["prefilter"] = update.prefilter
         return self.model_copy(update=update_data)
@@ -170,7 +175,7 @@ class TaskCreate(BaseModel):
     description: Optional[str] = ""
     analyze_images: bool = True
     max_pages: int = 3
-    personal_only: bool = True
+    personal_only: bool = False
     min_price: Optional[str] = None
     max_price: Optional[str] = None
     cron: Optional[str] = None
@@ -178,10 +183,12 @@ class TaskCreate(BaseModel):
     ai_prompt_criteria_file: str = ""
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"
-    free_shipping: bool = True
+    free_shipping: bool = False
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
     prefilter: Optional[ListingPrefilterConfig] = None
+    product_selection: Optional[ProductSelection] = None
+    monitor_mode: Literal["market", "buying"] = "market"
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
@@ -218,7 +225,9 @@ class TaskCreate(BaseModel):
     @model_validator(mode="after")
     def validate_decision_mode_payload(self):
         description = str(self.description or "").strip()
-        if self.decision_mode == "ai" and not description:
+        if self.monitor_mode == 'market' and re.search(r'mac\s*mini', self.task_name + ' ' + self.keyword, re.I) and self.product_selection is None:
+            raise ValueError('请先从商品库选择Mac mini型号、内存和内置SSD，再创建任务')
+        if self.monitor_mode == "buying" and self.decision_mode == "ai" and not description:
             raise ValueError("AI 判断模式下，详细需求(description)不能为空。")
         if self.decision_mode == "keyword" and not _has_keyword_rules(self.keyword_rules):
             raise ValueError("关键词判断模式下，至少需要一个关键词。")
@@ -250,6 +259,8 @@ class TaskUpdate(BaseModel):
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
     prefilter: Optional[ListingPrefilterConfig] = None
+    product_selection: Optional[ProductSelection] = None
+    monitor_mode: Optional[Literal["market", "buying"]] = None
     decision_mode: Optional[Literal["ai", "keyword"]] = None
     keyword_rules: Optional[List[str]] = None
     is_running: Optional[bool] = None
@@ -289,14 +300,14 @@ class TaskUpdate(BaseModel):
         if self.decision_mode == "keyword" and self.keyword_rules is not None:
             if not _has_keyword_rules(self.keyword_rules):
                 raise ValueError("关键词判断模式下，至少需要一个关键词。")
-        if self.decision_mode == "ai" and self.description is not None:
+        if self.monitor_mode == "buying" and self.decision_mode == "ai" and self.description is not None:
             if not str(self.description).strip():
                 raise ValueError("AI 判断模式下，详细需求(description)不能为空。")
         return self
 
 
 class TaskGenerateRequest(BaseModel):
-    """任务创建请求DTO（AI模式支持自动生成标准）"""
+    """任务创建请求DTO，行情目标支持商品库选择。"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -304,17 +315,19 @@ class TaskGenerateRequest(BaseModel):
     keyword: str
     description: Optional[str] = ""
     analyze_images: bool = True
-    personal_only: bool = True
+    personal_only: bool = False
     min_price: Optional[str] = None
     max_price: Optional[str] = None
     max_pages: int = 3
     cron: Optional[str] = None
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"
-    free_shipping: bool = True
+    free_shipping: bool = False
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
     prefilter: Optional[ListingPrefilterConfig] = None
+    product_selection: Optional[ProductSelection] = None
+    monitor_mode: Literal["market", "buying"] = "market"
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
@@ -356,7 +369,9 @@ class TaskGenerateRequest(BaseModel):
     @model_validator(mode="after")
     def validate_decision_mode_payload(self):
         description = str(self.description or "").strip()
-        if self.decision_mode == "ai" and not description:
+        if self.monitor_mode == 'market' and re.search(r'mac\s*mini', self.task_name + ' ' + self.keyword, re.I) and self.product_selection is None:
+            raise ValueError('请先从商品库选择Mac mini型号、内存和内置SSD，再创建任务')
+        if self.monitor_mode == "buying" and self.decision_mode == "ai" and not description:
             raise ValueError("AI 判断模式下，详细需求(description)不能为空。")
         if self.decision_mode == "keyword" and not _has_keyword_rules(self.keyword_rules):
             raise ValueError("关键词判断模式下，至少需要一个关键词。")

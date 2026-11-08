@@ -20,6 +20,8 @@ export interface Task {
   free_shipping?: boolean;
   new_publish_option?: string | null;
   region?: string | null;
+  product_selection?: { catalog_id: string; memory_gb: number; storage_gb: number } | null;
+  monitor_mode?: 'market' | 'buying';
   decision_mode: 'ai' | 'keyword';
   keyword_rules: string[];
   is_running: boolean;
@@ -57,6 +59,8 @@ export type TaskUpdate = Partial<Omit<Task, 'id' | 'next_run_at'>>;
 
 // For task creation
 export interface TaskGenerateRequest {
+  product_selection?: { catalog_id: string; memory_gb: number; storage_gb: number } | null;
+  monitor_mode?: 'market' | 'buying';
   task_name: string;
   keyword: string;
   description?: string;

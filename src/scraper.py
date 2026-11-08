@@ -520,6 +520,19 @@ async def scrape_user_profile(context, user_id: str) -> dict:
 
 
 async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
+    from src.services.market_report_service import MarketRun
+    from src.services.market_analysis_service import MarketAnalyzer
+    task_config = dict(task_config)
+    from src.services.product_catalog_service import catalog_search_fields
+    task_config.update(catalog_search_fields(task_config))
+    market = MarketRun(task_config) if task_config.get('monitor_mode', 'market') == 'market' else None
+    analyzer = MarketAnalyzer() if market else None
+    if market:
+        task_config['_market_run'] = market
+        task_config['_market_analyzer'] = analyzer
+        task_config['ai_prompt_text'] = market.prompt
+        if debug_limit:
+            market.fail('调试截断，仅展示部分观察')
     prefilter = PrefilterRun(task_config.get("prefilter"), task_id=task_config.get("id"))
     status = "failed"
     try:
@@ -549,6 +562,13 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         raise
     finally:
         prefilter.summary(status)
+        if market:
+            try:
+                await market.finish(status)
+            except Exception as exc:
+                log_time(f'行情报告保存/通知失败: {type(exc).__name__}')
+            finally:
+                await analyzer.close()
 
 
 async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: PrefilterRun):
@@ -556,6 +576,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
     【核心执行器】
     根据单个任务配置，异步爬取闲鱼商品数据，并对每个新发现的商品进行实时的、独立的AI分析和通知。
     """
+    market = task_config.get('_market_run')
     keyword = task_config["keyword"]
     max_pages = task_config.get("max_pages", 1)
     personal_only = task_config.get("personal_only", False)
@@ -579,7 +600,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
     history_seen_item_ids: set[str] = set()
     historical_snapshots = load_price_snapshots(keyword)
     result_filename = build_result_filename(keyword)
-    processed_links = load_processed_link_keys(keyword)
+    processed_links = set() if market else load_processed_link_keys(keyword)
     if processed_links:
         print(f"LOG: 发现已存在结果集 {result_filename}，已加载 {len(processed_links)} 个历史商品用于去重。")
     else:
@@ -721,6 +742,8 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                 ),
                 image_downloader=download_all_images,
                 ai_analyzer=get_ai_analysis,
+                market_analyzer=task_config['_market_analyzer'].analyze if market else None,
+                market_observer=market.observe if market else None,
                 notifier=send_ntfy_notification,
                 saver=save_to_jsonl,
                 stop_requested=(lambda: validation_watch.triggered) if remote else None,
@@ -1052,16 +1075,25 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                             page_num=page_num,
                         )
                         if not page_advance_result.advanced:
+                            if market and getattr(page_advance_result, 'stop_reason', '') not in {'no_next_button', 'next_button_disabled'}:
+                                market.fail('翻页未完成')
                             break
                         current_response = page_advance_result.response
 
                     if not (current_response and current_response.ok):
+                        if market:
+                            market.fail('搜索响应无效')
                         log_time(f"第 {page_num} 页响应无效，跳过。")
                         continue
 
-                    basic_items = await _parse_search_results_json(
-                        await current_response.json(), f"第 {page_num} 页"
-                    )
+                    search_json = await current_response.json()
+                    if market and isinstance(search_json, dict) and search_json.get('ret') and not any(str(r).startswith('SUCCESS') for r in search_json['ret']):
+                        market.fail('搜索接口返回异常')
+                    basic_items = await _parse_search_results_json(search_json, f"第 {page_num} 页")
+                    if market and isinstance(search_json, dict):
+                        raw_list = (search_json.get('data') or {}).get('resultList')
+                        if not isinstance(raw_list, list) or (raw_list and not basic_items):
+                            market.fail('搜索数据缺失或解析失败')
                     if not basic_items:
                         break
                     historical_snapshots.extend(
@@ -1091,6 +1123,12 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                             )
                             continue
 
+                        if market:
+                            processed_links.add(unique_key)  # one detail attempt per ID in this scan
+                        if market and market.target.reject_title(item_data.get('商品标题')):
+                            market.title_rejected += 1
+                            log_time('行情预筛：商品明确为其他芯片代际，跳过详情。')
+                            continue
                         if prefilter.should_skip(item_data.get("商品标题"), page_num, i):
                             continue
 
@@ -1145,6 +1183,9 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                 item_do = await safe_get(
                                     detail_json, "data", "itemDO", default={}
                                 )
+                                if market and not item_do:
+                                    market.fail('商品详情信息缺失')
+                                    continue
                                 seller_do = await safe_get(
                                     detail_json, "data", "sellerDO", default={}
                                 )
@@ -1193,6 +1234,25 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
 
                                 user_id = await safe_get(seller_do, "sellerId")
 
+                                if market:
+                                    item_data['商品描述'] = item_do.get('desc') or item_do.get('description') or ''
+                                    if item_do.get('title'):
+                                        item_data['商品标题'] = item_do['title']
+                                    # soldPrice is the detail API's yuan asking price. Never use originalPrice.
+                                    from src.services.price_history_service import parse_price_value
+                                    detail_price = parse_price_value(item_do.get('soldPrice'))
+                                    if detail_price is not None:
+                                        item_data['当前售价'] = str(detail_price)
+                                    detail_seller = {
+                                        '卖家昵称': seller_do.get('nick') or seller_do.get('nickName') or item_data.get('卖家昵称'),
+                                        '卖家芝麻信用': zhima_credit_text,
+                                        '卖家信用等级': seller_do.get('creditLevel') or seller_do.get('creditLevelText'),
+                                        '卖家注册时长': registration_duration_text,
+                                        '信息来源': '商品详情页',
+                                        '卖出商品数': seller_do.get('soldCount'),
+                                        '好评率': seller_do.get('positiveRate'),
+                                    }
+
                                 # 构建基础记录
                                 final_record = {
                                     "爬取时间": datetime.now().isoformat(),
@@ -1201,18 +1261,19 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                         "task_name", "Untitled Task"
                                     ),
                                     "商品信息": item_data,
-                                    "卖家信息": {},
+                                    "卖家信息": detail_seller if market else {},
                                 }
-                                price_reference = build_market_reference(
-                                    keyword=keyword,
-                                    item=item_data,
-                                    current_market_items=basic_items,
-                                    historical_snapshots=historical_snapshots,
-                                )
-                                final_record["价格参考"] = price_reference
-                                final_record["price_insight"] = price_reference.get(
-                                    "本商品价格位置", {}
-                                )
+                                if not market:
+                                    price_reference = build_market_reference(
+                                        keyword=keyword,
+                                        item=item_data,
+                                        current_market_items=basic_items,
+                                        historical_snapshots=historical_snapshots,
+                                    )
+                                    final_record["价格参考"] = price_reference
+                                    final_record["price_insight"] = price_reference.get(
+                                        "本商品价格位置", {}
+                                    )
 
                                 analysis_dispatcher.submit(
                                     ItemAnalysisJob(
@@ -1220,6 +1281,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                         task_name=task_config.get(
                                             "task_name", "Untitled Task"
                                         ),
+                                        monitor_mode="market" if market else "buying",
                                         decision_mode=decision_mode,
                                         analyze_images=analyze_images,
                                         prompt_text=ai_prompt_text,
@@ -1243,6 +1305,8 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                 )
                                 await random_sleep(5, 10)
                             else:
+                                if market:
+                                    market.fail('商品详情响应失败')
                                 print(
                                     f"   错误: 获取商品详情API响应失败，状态码: {detail_response.status}"
                                 )
@@ -1267,8 +1331,12 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                             # after the platform explicitly requested verification.
                             raise
                         except PlaywrightTimeoutError:
+                            if market:
+                                market.fail('商品详情超时')
                             print(f"   错误: 访问商品详情页或等待API响应超时。")
                         except Exception as e:
+                            if market:
+                                market.fail('商品详情处理异常')
                             print(f"   错误: 处理商品详情时发生未知错误: {e}")
                         finally:
                             if not remote or (await asyncio.to_thread(control.read))['state'] == 'ready':
