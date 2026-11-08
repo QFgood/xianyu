@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import BrowserSessionPanel from '@/components/accounts/BrowserSessionPanel.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { listAccounts, getAccount, createAccount, updateAccount, deleteAccount, type AccountItem } from '@/api/accounts'
@@ -13,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from '@/components/ui/toast'
 const { t } = useI18n()
 
+const remoteBrowser = ref(false)
 const accounts = ref<AccountItem[]>([])
 const isLoading = ref(false)
 const isSaving = ref(false)
@@ -126,12 +128,14 @@ onMounted(fetchAccounts)
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-800">{{ t('accounts.title') }}</h1>
-        <p class="text-sm text-gray-500 mt-1">{{ t('accounts.description') }}</p>
+        <p class="text-sm text-gray-500 mt-1">{{ remoteBrowser ? t('browserSession.pageDescription') : t('accounts.description') }}</p>
       </div>
-      <Button class="w-full sm:w-auto" @click="openCreateDialog">{{ t('accounts.add') }}</Button>
+      <Button v-if="!remoteBrowser" class="w-full sm:w-auto" @click="openCreateDialog">{{ t('accounts.add') }}</Button>
     </div>
 
-    <Card class="app-surface mb-6 border-none">
+    <BrowserSessionPanel @mode="remoteBrowser = $event" />
+
+    <Card v-if="!remoteBrowser" class="app-surface mb-6 border-none">
       <CardHeader>
         <CardTitle>{{ t('accounts.cookieGuide.title') }}</CardTitle>
       </CardHeader>
@@ -162,7 +166,7 @@ onMounted(fetchAccounts)
       </CardContent>
     </Card>
 
-    <Card class="app-surface border-none">
+    <Card v-if="!remoteBrowser" class="app-surface border-none">
       <CardHeader>
         <CardTitle>{{ t('accounts.list.title') }}</CardTitle>
         <CardDescription>{{ t('accounts.list.description') }}</CardDescription>

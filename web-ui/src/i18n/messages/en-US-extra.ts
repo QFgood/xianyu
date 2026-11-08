@@ -1,4 +1,31 @@
 const enUSExtra = {
+  browserSession: {
+    pageDescription: 'Log in directly in the browser desktop and take over verification yourself. No login-state export extension is required.',
+    sharedAccount: 'Shared browser',
+    currentLogin: 'Currently signed-in account',
+  "title": "Browser login and human handoff",
+  "running": "Scraping — stop the task before taking over",
+  "states": {
+    "needs_login": "Login required",
+    "ready": "Ready",
+    "verification_required": "Human verification required"
+  },
+  "affectedTask": "Affected task",
+  "description": "Log in directly in the persistent browser. All tasks sharing this browser pause when verification is required and wait for you.",
+  "step1": "Open the browser desktop. Use username browser and the browser password configured at deployment.",
+  "step2": "Complete login or verification yourself. Stop any running task before interacting with the browser.",
+  "step3": "Return here, enter the dashboard administrator password, and confirm completion. Future schedules can resume, or start a task manually.",
+  "open": "Open browser desktop",
+  "notificationFailed": "Enterprise WeChat notification failed. Check the robot configuration in Settings. Tasks remain paused.",
+  "password": "Confirm with dashboard administrator password",
+  "passwordHint": "Dashboard password, not the browser desktop password",
+  "confirm": "Login/verification completed — resume",
+  "pause": "Pause automation for human takeover",
+  "refresh": "Refresh status",
+  "scope": "All tasks use the currently signed-in browser account and access it serially. Confirmation is your acknowledgment, not independent account verification.",
+  "taskHint": "Uses the account signed into the shared browser. Log in through Accounts; no cookie import is needed."
+},
+
   tasks: {
     title: 'Tasks',
     toasts: {

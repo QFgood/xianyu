@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
+import { getBrowserStatus } from '@/api/browser'
 import { useI18n } from 'vue-i18n'
 import type { Task, TaskGenerateRequest } from '@/types/task.d.ts'
 import { Input } from '@/components/ui/input'
@@ -29,6 +30,10 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
+const remoteBrowser = ref(false)
+onMounted(async () => {
+  try { remoteBrowser.value = (await getBrowserStatus()).enabled } catch { /* existing local deployments */ }
+})
 const form = ref<any>({})
 const accountStrategy = ref<'auto' | 'fixed' | 'rotate'>('auto')
 const selectedAccountStateFile = ref(AUTO_ACCOUNT_VALUE)
@@ -215,7 +220,7 @@ function handleSubmit() {
 
   // Filter out fields that shouldn't be sent in update requests
   const { id, is_running, next_run_at, ...submitData } = form.value as any
-  const currentAccountStrategy = accountStrategy.value || 'auto'
+  const currentAccountStrategy = remoteBrowser.value ? 'auto' : (accountStrategy.value || 'auto')
   if (currentAccountStrategy === 'fixed') {
     const currentAccountStateFile = selectedAccountStateFile.value || AUTO_ACCOUNT_VALUE
     if (currentAccountStateFile === AUTO_ACCOUNT_VALUE) {
@@ -367,7 +372,8 @@ function handleSubmit() {
           </Tabs>
         </div>
       </div>
-      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <p v-if="remoteBrowser" class="rounded-md bg-blue-50 p-3 text-sm text-blue-800">{{ t('browserSession.taskHint') }}</p>
+      <div v-else class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label class="sm:text-right">{{ t('tasks.form.accountStrategyLabel') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <select
@@ -384,7 +390,7 @@ function handleSubmit() {
           </p>
         </div>
       </div>
-      <div v-if="accountStrategy === 'fixed'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <div v-if="!remoteBrowser && accountStrategy === 'fixed'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label class="sm:text-right">{{ t('tasks.form.fixedAccount') }}</Label>
         <div class="sm:col-span-3">
           <select
