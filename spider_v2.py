@@ -7,6 +7,7 @@ import signal
 import contextlib
 import re
 
+from src.services.browser_session_service import remote_browser_enabled
 from src.config import STATE_FILE
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.scraper import scrape_xianyu
@@ -91,7 +92,7 @@ async def main():
                     return True
         return False
 
-    if not os.path.exists(STATE_FILE) and not has_bound_account(tasks_config) and not has_any_state_file():
+    if not remote_browser_enabled() and not os.path.exists(STATE_FILE) and not has_bound_account(tasks_config) and not has_any_state_file():
         sys.exit(
             f"错误: 未找到登录状态文件。请在 state/ 中添加账号或配置 account_state_file。"
         )

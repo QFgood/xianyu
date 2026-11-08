@@ -46,6 +46,10 @@ from src.utils import (
 )
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.failure_guard import FailureGuard
+from src.services.browser_session_service import (
+    BrowserSessionControl, BrowserBusyError, connect_remote_browser,
+    remote_browser_enabled, notify_browser_handoff, VALIDATION_MARKERS, RemoteValidationWatch,
+)
 from src.services.listing_prefilter import PrefilterRun
 from src.services.account_strategy_service import resolve_account_runtime_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
@@ -154,6 +158,11 @@ async def _notify_task_failure(
     task_config: dict, reason: str, *, cookie_path: Optional[str]
 ) -> None:
     task_name = task_config.get("task_name", "未命名任务")
+    if remote_browser_enabled() and (any(m in reason for m in VALIDATION_MARKERS) or 'Login required' in reason):
+        control = BrowserSessionControl()
+        await asyncio.to_thread(control.require_help, task_name, 'verification_or_login_required')
+        await notify_browser_handoff(control)
+        return
     keyword = task_config.get("keyword", "")
     formatted_reason = _format_failure_reason(reason)
 
@@ -503,7 +512,8 @@ async def scrape_user_profile(context, user_id: str) -> dict:
         print(f"   [错误] 采集用户 {user_id} 信息时发生错误: {e}")
     finally:
         page.remove_listener("response", handle_response)
-        await page.close()
+        if not remote_browser_enabled() or (await asyncio.to_thread(BrowserSessionControl().read))['state'] == 'ready':
+            await page.close()
         print(f"   -> 用户 {user_id} 信息采集完成。")
 
     return profile_data
@@ -513,10 +523,28 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     prefilter = PrefilterRun(task_config.get("prefilter"), task_id=task_config.get("id"))
     status = "failed"
     try:
-        result = await _scrape_xianyu(task_config, debug_limit, prefilter)
+        if remote_browser_enabled():
+            control = BrowserSessionControl()
+            try:
+                with control.lease():
+                    if (await asyncio.to_thread(control.read))['state'] != 'ready':
+                        status = 'waiting_for_human'
+                        log_time('共享浏览器等待人工登录或验证，请在账号页处理。')
+                        return 0
+                    result = await _scrape_xianyu(task_config, debug_limit, prefilter)
+            except BrowserBusyError:
+                status = 'browser_busy'
+                log_time('共享浏览器正在使用，本次不启动并行采集。')
+                return 0
+        else:
+            result = await _scrape_xianyu(task_config, debug_limit, prefilter)
         status = prefilter.exit_status
         return result
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
+        if remote_browser_enabled() and exc.args == ('manual_browser_verification',):
+            status = 'waiting_for_human'
+            await notify_browser_handoff(BrowserSessionControl())
+            return 0
         status = "cancelled"
         raise
     finally:
@@ -565,7 +593,9 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
         has_root_state_file=os.path.exists(STATE_FILE),
         available_account_files=account_items,
     )
-    forced_account = runtime_plan["forced_account"]
+    remote = remote_browser_enabled()
+    control = BrowserSessionControl() if remote else None
+    forced_account = "__remote_browser__" if remote else runtime_plan["forced_account"]
     if runtime_plan["prefer_root_state"]:
         account_items = [STATE_FILE]
         rotation_settings["account_enabled"] = False
@@ -582,6 +612,12 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
         rotation_settings["proxy_blacklist_ttl"],
         "proxy",
     )
+
+    if remote:
+        rotation_settings['account_enabled'] = False
+        rotation_settings['proxy_enabled'] = False
+        rotation_settings['account_retry_limit'] = 1
+        rotation_settings['proxy_retry_limit'] = 1
 
     selected_account: Optional[RotationItem] = None
     selected_proxy: Optional[RotationItem] = None
@@ -620,50 +656,59 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
         processed_item_count = 0
         stop_scraping = False
 
-        if not os.path.exists(state_file):
+        if not remote and not os.path.exists(state_file):
             raise FileNotFoundError(f"登录状态文件不存在: {state_file}")
 
         snapshot_data = None
         try:
-            with open(state_file, "r", encoding="utf-8") as f:
-                snapshot_data = json.load(f)
+            if not remote:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    snapshot_data = json.load(f)
         except Exception as e:
             print(f"警告：读取登录状态文件失败，将直接按路径使用: {e}")
 
         async with async_playwright() as p:
-            launch_args = prepare_chromium_launch_args()
-
-            launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
-            if proxy_server:
-                launch_kwargs["proxy"] = {"server": proxy_server}
-
-            launch_kwargs["channel"] = _resolve_browser_channel()
-
-            browser = await p.chromium.launch(**launch_kwargs)
-
-            context_kwargs = _default_context_options()
-            storage_state_arg = state_file
             analysis_dispatcher: Optional[ItemAnalysisDispatcher] = None
+            if remote:
+                browser, context = await connect_remote_browser(p)
+            else:
+                launch_args = prepare_chromium_launch_args()
 
-            if isinstance(snapshot_data, dict):
-                # 新版扩展导出的增强快照，包含环境和Header
-                if any(
-                    key in snapshot_data
-                    for key in ("env", "headers", "page", "storage")
-                ):
-                    print(f"检测到增强浏览器快照，应用环境参数: {state_file}")
-                    storage_state_arg = {"cookies": snapshot_data.get("cookies", [])}
-                    context_kwargs.update(_build_context_overrides(snapshot_data))
-                    extra_headers = _build_extra_headers(snapshot_data.get("headers"))
-                    if extra_headers:
-                        context_kwargs["extra_http_headers"] = extra_headers
-                else:
-                    storage_state_arg = snapshot_data
+                launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
+                if proxy_server:
+                    launch_kwargs["proxy"] = {"server": proxy_server}
 
-            context_kwargs = _clean_kwargs(context_kwargs)
-            context = await browser.new_context(
-                storage_state=storage_state_arg, **context_kwargs
-            )
+                launch_kwargs["channel"] = _resolve_browser_channel()
+
+                browser = await p.chromium.launch(**launch_kwargs)
+
+                context_kwargs = _default_context_options()
+                storage_state_arg = state_file
+
+                if isinstance(snapshot_data, dict):
+                    # 新版扩展导出的增强快照，包含环境和Header
+                    if any(
+                        key in snapshot_data
+                        for key in ("env", "headers", "page", "storage")
+                    ):
+                        print(f"检测到增强浏览器快照，应用环境参数: {state_file}")
+                        storage_state_arg = {"cookies": snapshot_data.get("cookies", [])}
+                        context_kwargs.update(_build_context_overrides(snapshot_data))
+                        extra_headers = _build_extra_headers(snapshot_data.get("headers"))
+                        if extra_headers:
+                            context_kwargs["extra_http_headers"] = extra_headers
+                    else:
+                        storage_state_arg = snapshot_data
+
+                context_kwargs = _clean_kwargs(context_kwargs)
+                context = await browser.new_context(
+                    storage_state=storage_state_arg, **context_kwargs
+                )
+            original_pages = set(context.pages) if remote else set()
+            validation_watch = None
+            if remote:
+                validation_watch = RemoteValidationWatch(control, task_config.get('task_name', ''))
+                context.on('response', validation_watch.on_response)
             seller_profile_cache = SellerProfileCache(
                 ttl_seconds=_get_seller_profile_cache_ttl(task_config)
             )
@@ -678,31 +723,33 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                 ai_analyzer=get_ai_analysis,
                 notifier=send_ntfy_notification,
                 saver=save_to_jsonl,
+                stop_requested=(lambda: validation_watch.triggered) if remote else None,
             )
 
-            # 增强反检测脚本（模拟真实移动设备）
-            await context.add_init_script("""
-                // 移除webdriver标识
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            if not remote:
+                # 增强反检测脚本（模拟真实移动设备）
+                await context.add_init_script("""
+                    // 移除webdriver标识
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
-                // 模拟真实移动设备的navigator属性
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']});
+                    // 模拟真实移动设备的navigator属性
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']});
 
-                // 添加chrome对象
-                window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}};
+                    // 添加chrome对象
+                    window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}};
 
-                // 模拟触摸支持
-                Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 5});
+                    // 模拟触摸支持
+                    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 5});
 
-                // 覆盖permissions查询（避免暴露自动化）
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({state: Notification.permission}) :
-                        originalQuery(parameters)
-                );
-            """)
+                    // 覆盖permissions查询（避免暴露自动化）
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({state: Notification.permission}) :
+                            originalQuery(parameters)
+                    );
+                """)
 
             page = await context.new_page()
 
@@ -993,6 +1040,8 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                     else initial_response
                 )
                 for page_num in range(1, max_pages + 1):
+                    if remote and validation_watch.triggered:
+                        raise RiskControlError('FAIL_SYS_USER_VALIDATE')
                     if stop_scraping:
                         break
                     log_time(f"开始处理第 {page_num}/{max_pages} 页 ...")
@@ -1051,6 +1100,8 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                         # --- 修改: 访问详情页前的等待时间，模拟用户在列表页上看了一会儿 ---
                         await random_sleep(2, 4)  # 原来是 (2, 4)
 
+                        if remote and validation_watch.triggered:
+                            raise RiskControlError('FAIL_SYS_USER_VALIDATE')
                         detail_page = await context.new_page()
                         try:
                             async with detail_page.expect_response(
@@ -1076,15 +1127,18 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                     print(
                                         "检测到闲鱼反爬虫验证 (FAIL_SYS_USER_VALIDATE)，程序将终止。"
                                     )
-                                    long_sleep_duration = random.randint(3, 60)
-                                    print(
-                                        f"为避免账户风险，将执行一次长时间休眠 ({long_sleep_duration} 秒) 后再退出..."
-                                    )
-                                    await asyncio.sleep(long_sleep_duration)
-                                    print("长时间休眠结束，现在将安全退出。")
-                                    print(
-                                        "==================================================================="
-                                    )
+                                    if remote:
+                                        print('浏览器页面已保留，等待本人通过网页桌面完成验证。')
+                                    else:
+                                        long_sleep_duration = random.randint(3, 60)
+                                        print(
+                                            f"为避免账户风险，将执行一次长时间休眠 ({long_sleep_duration} 秒) 后再退出..."
+                                        )
+                                        await asyncio.sleep(long_sleep_duration)
+                                        print("长时间休眠结束，现在将安全退出。")
+                                        print(
+                                            "==================================================================="
+                                        )
                                     raise RiskControlError("FAIL_SYS_USER_VALIDATE")
 
                                 # 解析商品详情数据并更新 item_data
@@ -1205,6 +1259,9 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                     )
 
                         except (RiskControlError, LoginRequiredError):
+                            if remote:
+                                validation_watch.triggered = True
+                                await asyncio.to_thread(control.require_help, task_config.get('task_name', ''), 'verification_or_login_required')
                             # These terminate the whole attempt, not just this item.
                             # Swallowing them here would keep requesting more details
                             # after the platform explicitly requested verification.
@@ -1214,7 +1271,8 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                         except Exception as e:
                             print(f"   错误: 处理商品详情时发生未知错误: {e}")
                         finally:
-                            await detail_page.close()
+                            if not remote or (await asyncio.to_thread(control.read))['state'] == 'ready':
+                                await detail_page.close()
                             # --- 修改: 增加关闭页面后的短暂整理时间 ---
                             await random_sleep(2, 4)  # 原来是 (1, 2.5)
 
@@ -1232,7 +1290,16 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                     ) from e
                 print(f"\n操作超时错误: 页面元素或网络响应未在规定时间内出现。\n{e}")
                 raise
+            except (RiskControlError, LoginRequiredError):
+                if remote:
+                    validation_watch.triggered = True
+                    await asyncio.to_thread(control.require_help, task_config.get('task_name', ''), 'verification_or_login_required')
+                    if analysis_dispatcher is not None:
+                        await analysis_dispatcher.cancel_pending()
+                raise
             except asyncio.CancelledError:
+                if remote and analysis_dispatcher is not None:
+                    await analysis_dispatcher.cancel_pending()
                 log_time("收到取消信号，正在终止当前爬虫任务...")
                 raise
             except Exception as e:
@@ -1247,14 +1314,29 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                 print(f"\n爬取过程中发生未知错误: {e}")
                 raise
             finally:
-                if analysis_dispatcher is not None:
-                    log_time("等待后台分析任务完成...")
-                    await analysis_dispatcher.join()
-                log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
-                await asyncio.sleep(5)
-                if debug_limit:
-                    input("按回车键关闭浏览器...")
-                await browser.close()
+                try:
+                    if analysis_dispatcher is not None:
+                        log_time("等待后台分析任务完成...")
+                        if remote and (await asyncio.to_thread(control.read))['state'] != 'ready':
+                            await analysis_dispatcher.cancel_pending()
+                        else:
+                            await analysis_dispatcher.join()
+                finally:
+                    if validation_watch is not None:
+                        context.remove_listener('response', validation_watch.on_response)
+                    if remote:
+                        # The profile and challenge tabs belong to the browser container.
+                        # Never call Browser.close or clear its persistent context.
+                        if (await asyncio.to_thread(control.read))['state'] == 'ready':
+                            for owned_page in set(context.pages) - original_pages:
+                                if not owned_page.is_closed():
+                                    await owned_page.close()
+                    else:
+                        log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
+                        await asyncio.sleep(5)
+                        if debug_limit:
+                            input("按回车键关闭浏览器...")
+                        await browser.close()
 
         return processed_item_count
 
@@ -1281,6 +1363,9 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
     decision = FAILURE_GUARD.should_skip_start(
         task_name_for_guard, cookie_path=pause_cookie_path
     )
+    if remote and decision.skip and any(marker in decision.reason for marker in VALIDATION_MARKERS):
+        FAILURE_GUARD.record_success(task_name_for_guard)
+        decision = FAILURE_GUARD.should_skip_start(task_name_for_guard)
     if decision.skip:
         prefilter.exit_status = "paused"
         print(
