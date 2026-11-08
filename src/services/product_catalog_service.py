@@ -16,3 +16,13 @@ def search_products(query=''):
         if all(token in searchable for token in tokens):
             result.append(deepcopy(model))
     return {'revision': REVISION, 'items': result}
+
+
+def catalog_search_fields(payload):
+    """A selected model determines the platform query; free text cannot override it."""
+    if payload.get('monitor_mode', 'market') != 'market' or not payload.get('product_selection'):
+        return {}
+    from src.domain.models.product_selection import ProductSelection, find_product
+    selected = ProductSelection.model_validate(payload['product_selection'])
+    product = find_product(selected.catalog_id)
+    return {'keyword': product['name'], 'decision_mode': 'ai', 'keyword_rules': []}

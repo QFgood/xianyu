@@ -93,6 +93,7 @@ def test_chip_family_and_storage_are_independent_hard_constraints():
     target = MarketTarget.from_task(task())
     assert (target.product_family, target.chip, target.memory_gb, target.storage_gb) == ('mac mini','m6',16,256)
     assert target.reject_title('Mac mini M4 16+256 自用')
+    assert target.reject_title('MacminiM4 16+256 自用')
     assert target.reject_title('Mac mini 2024款，M3芯片，16G内存+256G固态')
     assert target.reject_title('Mac mini M6 Pro 16+256')
     assert not target.reject_title('Mac mini M6 16+256')
@@ -103,6 +104,8 @@ def test_chip_family_and_storage_are_independent_hard_constraints():
     base = record()['market_analysis']
     item = record()['商品信息']
     assert target.validate_identity(base, item)['match_status'] == 'match'
+    compact = base | {'identity_evidence':'MacminiM6 16+256'}
+    assert target.validate_identity(compact, item | {'商品标题':'MacminiM6 16+256'})['match_status'] == 'match'
     for change in ({'chip':'M4'}, {'chip':'M3'}, {'chip':'M2'}, {'chip':'M6 Pro'},
                    {'product_family':'macbook air'}, {'storage_gb':512}, {'memory_gb':24}):
         assert target.validate_identity(base | change, item)['match_status'] == 'no_match'
@@ -162,4 +165,20 @@ def test_only_three_good_condition_grades_enter_market(tmp_path, monkeypatch):
         assert len(report['excluded']) == 5
         message = format_report(report)
         assert '故障：' not in message and '几乎全新：1 件' in message
+    asyncio.run(scenario())
+
+
+def test_market_analyzer_does_not_treat_task_labels_as_observed_evidence():
+    from src.services.market_analysis_service import MarketAnalyzer
+    from types import SimpleNamespace
+    async def scenario():
+        analyze = AsyncMock(return_value=record()['market_analysis'])
+        analyzer = MarketAnalyzer()
+        analyzer.client = SimpleNamespace(analyze=analyze)
+        observed = record() | {'任务名称':'别名M4', '搜索关键字':'其他芯片'}
+        result = await analyzer.analyze(observed, [], '明确的结构化目标')
+        assert result['match_status'] == 'match'
+        sent = analyze.call_args.args[0]
+        assert set(sent) == {'商品信息','卖家信息','analysis_purpose'}
+        assert '任务名称' not in sent and sent['商品信息'] == observed['商品信息']
     asyncio.run(scenario())

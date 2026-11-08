@@ -42,13 +42,15 @@ def test_selected_product_overrides_name_description_and_prompt_guesses(tmp_path
         task = await service.create_task(TaskCreate(task_name='随便起的名称 M4 32+512', keyword='Mac mini M4',
             description='换机时提到M2 8+512', product_selection=SELECTION))
         assert task.product_selection.model_dump() == SELECTION
+        assert task.keyword == 'Mac mini M6' and task.decision_mode == 'ai'
         target = MarketTarget.from_task(task.model_dump())
         assert (target.chip,target.memory_gb,target.storage_gb,target.cpu_cores,target.gpu_cores) == ('m6',16,256,12,12)
         assert target.reject_title('Mac mini M4 16+256')
         prompt = build_market_prompt(task.model_dump())
         assert '目标：Mac mini M6 / 12核CPU 12核GPU / 16GB / 256GB内置SSD' in prompt
         # PATCH keeps the nested typed selection; saving/reloading doesn't lose it.
-        updated = await service.update_task(task.id,TaskUpdate(description='新的补充说明'))
+        updated = await service.update_task(task.id,TaskUpdate(description='新的补充说明',keyword='Mac mini M4'))
+        assert updated.keyword == 'Mac mini M6'
         assert updated.product_selection == task.product_selection
         choice = SELECTION | {'memory_gb':24,'storage_gb':512}
         updated = await service.update_task(task.id,TaskUpdate(product_selection=choice))

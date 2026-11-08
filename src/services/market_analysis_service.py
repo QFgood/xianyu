@@ -56,7 +56,9 @@ class MarketAnalyzer:
         if self.client is None:
             self.client = AIClient()
         # The generic client must not append the legacy buying instructions.
-        result = await self.client.analyze({**record, 'analysis_purpose': 'market'}, images, prompt)
+        result = await self.client.analyze({'商品信息': record.get('商品信息', {}),
+                                            '卖家信息': record.get('卖家信息', {}),
+                                            'analysis_purpose': 'market'}, images, prompt)
         if result is None:
             raise ValueError('行情分类不可用，样本不计入统计')
         validated = MarketClassification.model_validate(result).model_dump()

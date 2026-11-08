@@ -5,7 +5,9 @@ from dataclasses import dataclass
 
 
 def normalize(value):
-    return ' '.join(unicodedata.normalize('NFKC', str(value or '')).casefold().split())
+    text = unicodedata.normalize('NFKC', str(value or '')).casefold()
+    text = re.sub(r'(?<![a-z])mac\s*mini(?=m\d)', 'mac mini ', text)
+    return ' '.join(text.split())
 
 
 CHIP = re.compile(r'(?<![a-z0-9])m\s*([1-9]\d?)\s*(pro|max|ultra)?(?![a-z0-9])', re.I)

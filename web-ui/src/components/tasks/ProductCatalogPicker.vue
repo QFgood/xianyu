@@ -34,7 +34,7 @@ function confirm() {
   if (!candidate.value || !memory.value || !storage.value) return
   const selection = { catalog_id: candidate.value.id, memory_gb: Number(memory.value), storage_gb: Number(storage.value) }
   emit('update:modelValue', selection)
-  emit('selected', { selection, name: `${candidate.value.name} ${selection.memory_gb}GB ${size(selection.storage_gb)}`, keyword: candidate.value.name })
+  emit('selected', { selection, name: `${candidate.value.name}${candidate.value.chip.includes('Pro') ? ` (${candidate.value.cpu_cores}/${candidate.value.gpu_cores}核)` : ''} ${selection.memory_gb}GB ${size(selection.storage_gb)}`, keyword: candidate.value.name })
   editing.value = false
 }
 watch(editing, value => emit('pending', value), { immediate: true })
@@ -69,7 +69,7 @@ onUnmounted(() => { clearTimeout(timer); requestId++ })
       </div>
     </template>
     <div v-else-if="modelValue" class="space-y-2">
-      <p class="text-sm font-medium">{{ selected?.name || modelValue.catalog_id }} · {{ modelValue.memory_gb }}GB · {{ size(modelValue.storage_gb) }} 内置 SSD</p>
+      <p class="text-sm font-medium">{{ selected?.name || modelValue.catalog_id }}<span v-if="selected"> · {{ selected.cpu_cores }}/{{ selected.gpu_cores }} 核</span> · {{ modelValue.memory_gb }}GB · {{ size(modelValue.storage_gb) }} 内置 SSD</p>
       <p class="text-xs text-slate-500">已锁定所选型号、芯片、核心数和容量。下面的补充说明不能覆盖这些配置。</p>
     </div>
   </section>

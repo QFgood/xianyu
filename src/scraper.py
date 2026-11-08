@@ -523,6 +523,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     from src.services.market_report_service import MarketRun
     from src.services.market_analysis_service import MarketAnalyzer
     task_config = dict(task_config)
+    from src.services.product_catalog_service import catalog_search_fields
+    task_config.update(catalog_search_fields(task_config))
     market = MarketRun(task_config) if task_config.get('monitor_mode', 'market') == 'market' else None
     analyzer = MarketAnalyzer() if market else None
     if market:
