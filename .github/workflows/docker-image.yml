@@ -3,7 +3,7 @@ name: Docker Image CI on merge to master
 on:
   workflow_dispatch:
   pull_request:
-    types: [closed]
+    types: [opened, synchronize, reopened, closed]
     branches: ["master"]
 
 env:
@@ -139,3 +139,68 @@ jobs:
           tags: ${{ steps.prepare.outputs.app_tags }}
           cache-from: type=gha,scope=ai-goofish-release-docker
           cache-to: type=gha,scope=ai-goofish-release-docker,mode=min,ignore-error=true
+
+  build-browser:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && (github.event.action != 'closed' || github.event.pull_request.merged == true))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Prepare browser image tags
+        id: browser-tags
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          owner_lower=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner_lower}/ai-goofish-browser" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build native browser for startup test
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker/browser
+          file: ./docker/browser/Dockerfile
+          load: true
+          tags: ai-goofish-browser:smoke
+          cache-from: type=gha,scope=ai-goofish-browser
+      - name: Test browser desktop and CDP before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          BROWSER_PASSWORD="$(openssl rand -hex 24)"
+          export BROWSER_PASSWORD
+          echo "::add-mask::${BROWSER_PASSWORD}"
+          trap 'docker rm -f browser-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name browser-smoke --cap-drop ALL \
+            --security-opt no-new-privileges:true --shm-size=1g \
+            -e BROWSER_PASSWORD -e BROWSER_START_URL=about:blank \
+            -p 127.0.0.1:17900:7900 -p 127.0.0.1:19223:9223 ai-goofish-browser:smoke
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:19223/json/version >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://127.0.0.1:19223/json/version >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:17900/vnc.html)" = 401
+          curl --silent --fail --user "browser:${BROWSER_PASSWORD}" http://127.0.0.1:17900/vnc.html >/dev/null
+      - uses: docker/build-push-action@v5
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+        with:
+          context: ./docker/browser
+          file: ./docker/browser/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.browser-tags.outputs.image }}:latest
+            ${{ steps.browser-tags.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=ai-goofish-browser
+          cache-to: type=gha,scope=ai-goofish-browser,mode=min,ignore-error=true
