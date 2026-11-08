@@ -64,7 +64,7 @@ Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通�
 
 ## 验收与限制
 
-- `python -m pytest -m 'not live and not live_slow'`：238 passed，3 live tests deselected。
+- `python -m pytest -m 'not live and not live_slow'`：246 passed，3 live tests deselected。
 - `cd web-ui && npm ci && npm run build`：通过。
 - 已构建浏览器镜像并启动实际 Chromium、Xvfb、x11vnc、websockify、nginx：无凭据桌面直接返回 200；WebSocket 成功收到 VNC RFB 握手。
 - 实际 Playwright CDP 连接通过；合成测试 Cookie 在断开重连及浏览器重启后保留。
@@ -75,3 +75,33 @@ Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通�
 ## 回滚
 
 先停止 app 任务和服务，保留 `browser-profile` 卷及 SQLite 备份，再使用已知旧版 app 镜像和旧 Compose 文件。旧模式需要原有登录态文件及自带浏览器的旧镜像。不要在浏览器容器运行时用旧程序并行操作它，也不要为回滚删除数据库的新元数据或浏览器资料卷。
+
+## 已登录但“恢复任务”提示连接失败
+
+网页桌面（7900）和程序控制通道（CDP 9223）是不同入口。若桌面内已经登录，而控制连接失败，先检查控制通道，不需要退出闲鱼或删除资料卷。
+
+已修复 Docker 服务名场景的一处握手问题：旧版仅在 HTTP `/json/version` 探测中使用 `Host: localhost`，后续 WebSocket 握手仍使用 `Host: browser:9223`，被 Chromium 拒绝并返回 `500 Host header is specified and is not an IP address or localhost`。新版在两个阶段均设置 Chromium 接受的 Host，请求仍经 Docker 服务名连接原浏览器。
+
+升级含本修复的 app 镜像后，仅重建 app，保留 browser 运行与当前登录页面：
+
+```bash
+docker compose pull app
+docker compose up -d --no-deps app
+docker compose exec -T app python -m tools.check_browser_connection
+```
+
+如 `APP_IMAGE` 固定到旧标签，请先更新到包含修复的镜像。只读检查成功时输出 `{"ok":true,"stage":"connected","contexts":1}`（空格格式可能不同），不会导航网页、读取 Cookie、关闭浏览器或改变就绪状态。成功后回到账号页点击“已完成登录/验证，恢复任务”。
+
+连接失败会区分阶段，而不再笼统提示“容器未运行”：
+
+| 错误码 | 排查方向 |
+| --- | --- |
+| `cdp_config_invalid` | BROWSER_CDP_URL 主机、端口或格式错误 |
+| `cdp_discovery_unreachable` | Docker DNS、网络或控制端口不可达 |
+| `cdp_discovery_http_error` | CDP HTTP 探测返回非成功状态 |
+| `cdp_discovery_invalid` | 连接到了网页桌面等错误服务，未收到 CDP 元数据 |
+| `cdp_websocket_failed` | HTTP 探测成功，但 WebSocket 握手失败 |
+| `cdp_context_missing` | 已连接，但没有默认持久化上下文 |
+| `cdp_driver_error` | app 内的 Playwright 驱动运行环境异常 |
+
+日志和诊断不输出 Cookie、完整 WebSocket 会话地址或远端响应正文。CI 在 HTTP 健康检查之外，增加同一 Docker 网络内以 `browser:9223` 连接真实 Chromium WebSocket 的检查，覆盖本次故障路径。

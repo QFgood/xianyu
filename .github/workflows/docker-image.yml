@@ -177,8 +177,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          trap 'docker rm -f browser-smoke >/dev/null 2>&1 || true' EXIT
-          docker run -d --name browser-smoke --cap-drop ALL \
+          trap 'docker rm -f browser-smoke cdp-client-smoke >/dev/null 2>&1 || true; docker network rm browser-smoke-net >/dev/null 2>&1 || true' EXIT
+          docker network create browser-smoke-net
+          docker run -d --name browser-smoke --network browser-smoke-net --network-alias browser --cap-drop ALL \
             --security-opt no-new-privileges:true --shm-size=1g \
             -e BROWSER_START_URL=about:blank \
             -p 127.0.0.1:17900:7900 -p 127.0.0.1:19223:9223 ai-goofish-browser:smoke
@@ -188,6 +189,12 @@ jobs:
           done
           curl --silent --fail http://127.0.0.1:19223/json/version >/dev/null
           curl --silent --fail http://127.0.0.1:17900/vnc.html >/dev/null
+          # A real client on the Compose-style Docker DNS path must complete
+          # WebSocket CDP, not just pass the HTTP discovery healthcheck.
+          docker run --rm --name cdp-client-smoke --network browser-smoke-net \
+            -v "$PWD:/workspace:ro" -e PYTHONPATH=/workspace \
+            -e BROWSER_CDP_URL=http://browser:9223 python:3.11-slim-bookworm \
+            sh -c 'pip install --quiet --no-cache-dir playwright httpx && python -m tools.check_browser_connection'
       - uses: docker/build-push-action@v5
         if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
         with:
