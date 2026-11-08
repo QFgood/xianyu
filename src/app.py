@@ -104,6 +104,8 @@ app = FastAPI(
 )
 
 # 注册路由
+from src.api.routes import market
+app.include_router(market.router)
 app.include_router(tasks.router)
 app.include_router(dashboard.router)
 app.include_router(logs.router)

@@ -190,6 +190,7 @@ class AIClient:
             product_json,
             prompt_text,
             include_images=bool(image_data_urls),
+            market_analysis=product_data.get("analysis_purpose") == "market",
         )
         user_content = build_user_message_content(text_prompt, image_data_urls)
         return [{"role": "user", "content": user_content}]

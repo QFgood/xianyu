@@ -109,6 +109,11 @@ async def main():
         else:
             task["keyword_rules"] = normalize_keywords(keyword_rules)
 
+        if task.get('monitor_mode', 'market') == 'market':
+            from src.services.market_analysis_service import build_market_prompt
+            task['ai_prompt_text'] = build_market_prompt(task)
+            continue
+
         if decision_mode == "keyword":
             task["ai_prompt_text"] = ""
             continue

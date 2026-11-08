@@ -14,6 +14,7 @@ def build_analysis_text_prompt(
     prompt_text: str,
     *,
     include_images: bool,
+    market_analysis: bool = False,
 ) -> str:
     note = "" if include_images else f"\n{TEXT_ONLY_ANALYSIS_NOTE}\n"
     value_note = (
@@ -22,6 +23,8 @@ def build_analysis_text_prompt(
         "你可以额外输出可选字段 value_score(0-100) 和 value_summary，"
         "但必须保留原有 is_recommended/reason 等字段。\n"
     )
+    if market_analysis:
+        value_note = ""  # 行情分类不附加购买推荐的 schema 和要求。
     return f"""请基于你的专业知识和我的要求，分析以下完整的商品JSON数据：
 
 ```json

@@ -30,6 +30,7 @@ class ItemAnalysisJob:
     seller_id: Optional[str]
     zhima_credit_text: Optional[str]
     registration_duration_text: str
+    monitor_mode: str = "buying"
 
 
 class ItemAnalysisDispatcher:
@@ -46,7 +47,11 @@ class ItemAnalysisDispatcher:
         notifier: Notifier,
         saver: Saver,
         stop_requested: Callable[[], bool] | None = None,
+        market_analyzer: AIAnalyzer | None = None,
+        market_observer=None,
     ) -> None:
+        self._market_analyzer = market_analyzer
+        self._market_observer = market_observer
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
         self._skip_ai_analysis = skip_ai_analysis
         self._seller_loader = seller_loader
@@ -83,6 +88,9 @@ class ItemAnalysisDispatcher:
             return
         record = copy.deepcopy(job.final_record)
         item_data = record.get("商品信息", {}) or {}
+        if job.monitor_mode == 'market':
+            await self._process_market(job, record)
+            return
         record["卖家信息"] = await self._load_seller_info(job)
         if self._stop_requested():
             return
@@ -93,6 +101,47 @@ class ItemAnalysisDispatcher:
             self.completed_count += 1
         if not self._stop_requested():
             await self._notify_if_recommended(item_data, record["ai_analysis"])
+
+    async def _process_market(self, job, record):
+        images = []
+        try:
+            if self._skip_ai_analysis:
+                raise ValueError('AI分析已关闭，不能确认目标配置')
+            # Keyword hits may narrow candidates, but cannot prove SKU/whole-unit price.
+            if job.decision_mode == 'keyword':
+                hit = self._build_keyword_result(job, record)
+                if not hit.get('is_recommended'):
+                    result = dict(match_status='no_match', price_kind='unknown', condition='unknown',
+                                  model='', reason='未命中配置关键词')
+                else:
+                    images = await self._download_images(job, record)
+                    if self._stop_requested():
+                        return
+                    if self._market_analyzer is None:
+                        raise ValueError('未配置行情分类器')
+                    result = await self._market_analyzer(record, images, job.prompt_text)
+            else:
+                images = await self._download_images(job, record)
+                if self._stop_requested():
+                    return
+                if self._market_analyzer is None:
+                    raise ValueError('未配置行情分类器')
+                result = await self._market_analyzer(record, images, job.prompt_text)
+            record['market_analysis'] = result
+        except Exception as exc:
+            record['market_analysis'] = dict(match_status='unknown', price_kind='unknown',
+                condition='unknown', model='', reason='配置分类失败，本轮不完整', error=type(exc).__name__)
+        finally:
+            self._cleanup_images(images)
+        if self._stop_requested():
+            return
+        record['ai_analysis'] = dict(analysis_source='market', is_recommended=False,
+                                     reason=record['market_analysis']['reason'], keyword_hit_count=0)
+        if self._market_observer:
+            await self._market_observer(record)
+            record['ai_analysis']['reason'] = record['market_analysis']['reason']
+        if await self._saver(record, job.keyword):
+            self.completed_count += 1
 
     async def _load_seller_info(self, job: ItemAnalysisJob) -> dict:
         seller_info = {}

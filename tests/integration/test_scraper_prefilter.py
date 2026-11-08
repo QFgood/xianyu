@@ -186,7 +186,7 @@ def replay(monkeypatch, tmp_path):
     for name, fn in [('scrape_user_profile', seller), ('download_all_images', images), ('get_ai_analysis', ai), ('save_to_jsonl', save), ('send_ntfy_notification', notify)]:
         monkeypatch.setattr(scraper, name, fn)
 
-    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai', validation=False, remote=False, seller_validation=False):
+    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai', validation=False, remote=False, seller_validation=False, monitor_mode='buying'):
         pages[:] = copy.deepcopy(data or [[item(i, title) for i, title in enumerate(TITLES)]])
         current['page'] = 0
         current['shared_seller'] = shared_seller
@@ -208,7 +208,7 @@ def replay(monkeypatch, tmp_path):
             monkeypatch.setattr(scraper, 'connect_remote_browser', connect)
         else:
             monkeypatch.setenv('BROWSER_MODE', 'local')
-        config = dict(keyword='offline', task_name='offline', max_pages=len(pages), account_strategy='fixed', account_state_file=str(state), personal_only=False, free_shipping=False, ai_prompt_text='original prompt with unchanged criteria', decision_mode=decision_mode, keyword_rules=['mac'], analyze_images=True, prefilter=POLICY | {'mode': mode})
+        config = dict(monitor_mode=monitor_mode, keyword='offline', task_name='Mac mini M6 16GB 256GB' if monitor_mode == 'market' else 'offline', max_pages=len(pages), account_strategy='fixed', account_state_file=str(state), personal_only=False, free_shipping=False, ai_prompt_text='original prompt with unchanged criteria', decision_mode=decision_mode, keyword_rules=['mac'], analyze_images=True, prefilter=POLICY | {'mode': mode})
         if source:
             import spider_v2
             from src.domain.models.task import Task
@@ -446,3 +446,50 @@ def test_seller_validation_is_watched_until_dispatcher_finishes(replay, monkeypa
     assert not calls['ai']
     assert not calls['saved']
     assert not calls['browser_closed']
+
+
+def test_market_only_uses_details_and_resamples_seen_prices(replay, monkeypatch):
+    from src.services.market_analysis_service import MarketAnalyzer
+    from src.services.notification_service import NotificationService
+    from src.infrastructure.persistence.market_report_repository import MarketReportRepository
+    run, calls = replay
+    async def classify(self, record, images, prompt):
+        assert '购买推荐' in prompt and '{{TARGET}}' not in prompt
+        assert record['卖家信息']['信息来源'] == '商品详情页'
+        title = record['商品信息']['商品标题']
+        return dict(match_status='match' if 'M6 16+256' in title else 'unknown',
+                    price_kind='whole_unit', condition='light_wear', functional_status='normal', model='M6 16+256',
+                    product_family='mac mini', chip='M6', memory_gb=16, storage_gb=256,
+                    identity_evidence='Mac mini M6 16+256', evidence_source='text', reason='详情配置对应整机报价')
+    monkeypatch.setattr(MarketAnalyzer, 'analyze', classify)
+    notify = AsyncMock(return_value={'wecom':{'success':True}})
+    monkeypatch.setattr(NotificationService, 'send_notification', notify)
+    import src.scraper as scraper
+    monkeypatch.setattr(scraper, 'load_processed_link_keys', lambda *_: {'1','2','3'})
+    assert run('off', monitor_mode='market') == 3
+    assert calls['seller'] == [] and calls['seller_load'] == []
+    assert calls['notified'] == []  # no individual recommendations
+    assert len(calls['detail']) == 3
+    assert notify.await_count == 1
+    report = MarketReportRepository().reports()[0]
+    assert report['sample_count'] == 1 and report['summary']['median'] == 2000
+    run('off', monitor_mode='market')
+    assert len(calls['detail']) == 6 and notify.await_count == 1
+    changed = [[item(1, 'Mac mini M6 16+256') | {'当前售价':'¥2500'}]]
+    run('off', data=changed, monitor_mode='market')
+    assert notify.await_count == 2
+    assert MarketReportRepository().reports()[0]['changes']['repriced'] == 1
+
+
+def test_market_verification_keeps_partial_report_and_never_sends_market_alert(replay, monkeypatch):
+    from src.services.notification_service import NotificationService
+    from src.infrastructure.persistence.market_report_repository import MarketReportRepository
+    notify = AsyncMock()
+    monkeypatch.setattr(NotificationService, 'send_notification', notify)
+    run, calls = replay
+    import src.scraper as scraper
+    monkeypatch.setattr(scraper, '_notify_task_failure', AsyncMock())
+    run('off', monitor_mode='market', remote=True, validation=True)
+    report = MarketReportRepository().reports()[0]
+    assert report['status'] == 'partial'
+    assert not any(call.args[0].get('market_report') for call in notify.await_args_list)

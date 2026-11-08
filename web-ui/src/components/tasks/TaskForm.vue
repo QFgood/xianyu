@@ -130,13 +130,13 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       description: '',
       analyze_images: true,
       max_pages: 3,
-      personal_only: true,
+      personal_only: false,
       min_price: undefined,
       max_price: undefined,
       cron: '',
       account_strategy: props.defaultAccount ? 'fixed' : 'auto',
       account_state_file: props.defaultAccount || AUTO_ACCOUNT_VALUE,
-      free_shipping: true,
+      free_shipping: false,
       new_publish_option: '__none__',
       region: '',
       decision_mode: 'ai',
@@ -199,7 +199,7 @@ function handleSubmit() {
   }
 
   const decisionMode = form.value.decision_mode || 'ai'
-  if (decisionMode === 'ai' && !String(form.value.description || '').trim()) {
+  if (form.value.monitor_mode === 'buying' && decisionMode === 'ai' && !String(form.value.description || '').trim()) {
     toast({
       title: t('tasks.form.validation.incomplete'),
       description: t('tasks.form.validation.aiDescriptionRequired'),
@@ -250,6 +250,7 @@ function handleSubmit() {
     submitData.new_publish_option = ''
   }
 
+  submitData.monitor_mode = 'market'
   submitData.decision_mode = decisionMode
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
@@ -300,7 +301,7 @@ function handleSubmit() {
           </p>
         </div>
       </div>
-      <div v-if="form.decision_mode === 'ai'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="analyze-images" class="sm:text-right">{{ t('tasks.form.analyzeImages') }}</Label>
         <div class="space-y-1 sm:col-span-3">
           <Switch id="analyze-images" v-model="form.analyze_images" />

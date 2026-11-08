@@ -82,6 +82,7 @@ def test_generate_ai_task_returns_job_and_completes_async(api_client, api_contex
         "prefilter": {"mode": "off"},
         "task_name": "Apple Watch S10",
         "keyword": "apple watch s10",
+        "monitor_mode": "buying",
         "description": "只看国行蜂窝版，电池健康高于 95%，拒绝维修机。",
         "analyze_images": False,
         "decision_mode": "ai",
@@ -217,3 +218,20 @@ def test_prefilter_patch_contract_and_validation(api_client, sample_task_payload
     assert api_client.patch('/api/tasks/0', json={'prefilter': off}).json()['task']['prefilter']['product_aliases'] == []
     assert api_client.patch('/api/tasks/0', json={'prefilter': None}).json()['task']['prefilter'] is None
     generate.assert_not_called()
+
+
+def test_market_creation_and_edit_do_not_generate_buying_prompt(api_client, monkeypatch):
+    from unittest.mock import AsyncMock
+    forbidden = AsyncMock(side_effect=AssertionError('market must not generate buyer persona'))
+    monkeypatch.setattr('src.api.routes.tasks.generate_criteria', forbidden)
+    monkeypatch.setattr('src.services.task_generation_runner.generate_criteria', forbidden)
+    response = api_client.post('/api/tasks/generate', json={
+        'task_name':'Mac mini M6 16GB 256GB', 'keyword':'Mac mini M6', 'description':'16GB+256GB内置SSD'})
+    assert response.status_code == 200
+    task = response.json()['task']
+    assert task['monitor_mode'] == 'market'
+    assert task['personal_only'] is False and task['free_shipping'] is False
+    response = api_client.patch(f"/api/tasks/{task['id']}", json={'description':'16GB+512GB'})
+    assert response.status_code == 200
+    forbidden.assert_not_called()
+    assert api_client.get('/api/market/reports').status_code == 200

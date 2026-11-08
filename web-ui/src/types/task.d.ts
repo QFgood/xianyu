@@ -20,6 +20,7 @@ export interface Task {
   free_shipping?: boolean;
   new_publish_option?: string | null;
   region?: string | null;
+  monitor_mode?: 'market' | 'buying';
   decision_mode: 'ai' | 'keyword';
   keyword_rules: string[];
   is_running: boolean;

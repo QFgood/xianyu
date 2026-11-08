@@ -17,7 +17,7 @@ const routes = [
       {
         path: 'dashboard',
         name: 'Dashboard',
-        component: () => import('@/views/DashboardView.vue'),
+        component: () => import('@/views/MarketView.vue'),
         meta: { titleKey: 'routes.dashboard' },
       },
       {
@@ -35,6 +35,12 @@ const routes = [
       {
         path: 'results',
         name: 'Results',
+        component: () => import('@/views/MarketView.vue'),
+        meta: { titleKey: 'routes.results' },
+      },
+      {
+        path: 'results/legacy',
+        name: 'LegacyResults',
         component: () => import('@/views/ResultsView.vue'),
         meta: { titleKey: 'routes.results' },
       },

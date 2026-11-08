@@ -98,7 +98,7 @@ async def generate_task(
 
     try:
         mode = req.decision_mode or "ai"
-        if mode == "ai":
+        if mode == "ai" and req.monitor_mode == "buying":
             job = await generation_service.create_job(req.task_name)
             generation_service.track(
                 run_ai_generation_job(
@@ -169,7 +169,7 @@ async def update_task(
             )
             if not _has_keyword_rules(final_rules):
                 raise HTTPException(status_code=400, detail="关键词模式下至少需要一个关键词。")
-        if target_mode == "ai" and (description_changed or switched_to_ai):
+        if (task_update.monitor_mode or existing_task.monitor_mode) == "buying" and target_mode == "ai" and (description_changed or switched_to_ai):
             print(f"检测到任务 {task_id} 需要刷新 AI 标准文件，开始重新生成...")
             try:
                 description_for_ai = (
