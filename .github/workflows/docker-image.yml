@@ -177,21 +177,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BROWSER_PASSWORD="$(openssl rand -hex 24)"
-          export BROWSER_PASSWORD
-          echo "::add-mask::${BROWSER_PASSWORD}"
           trap 'docker rm -f browser-smoke >/dev/null 2>&1 || true' EXIT
           docker run -d --name browser-smoke --cap-drop ALL \
             --security-opt no-new-privileges:true --shm-size=1g \
-            -e BROWSER_PASSWORD -e BROWSER_START_URL=about:blank \
+            -e BROWSER_START_URL=about:blank \
             -p 127.0.0.1:17900:7900 -p 127.0.0.1:19223:9223 ai-goofish-browser:smoke
           for attempt in {1..30}; do
             if curl --silent --fail http://127.0.0.1:19223/json/version >/dev/null; then break; fi
             sleep 2
           done
           curl --silent --fail http://127.0.0.1:19223/json/version >/dev/null
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:17900/vnc.html)" = 401
-          curl --silent --fail --user "browser:${BROWSER_PASSWORD}" http://127.0.0.1:17900/vnc.html >/dev/null
+          curl --silent --fail http://127.0.0.1:17900/vnc.html >/dev/null
       - uses: docker/build-push-action@v5
         if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
         with:

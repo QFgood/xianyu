@@ -16,11 +16,10 @@ export function getBrowserStatus(): Promise<BrowserStatus> {
   return http('/api/browser/status')
 }
 
-export function updateBrowserState(action: 'pause' | 'ready', incidentId: string, username: string, password: string): Promise<BrowserStatus> {
-  const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(`${username}:${password}`)))
+export function updateBrowserState(action: 'pause' | 'ready', incidentId: string): Promise<BrowserStatus> {
   return http(`/api/browser/${action}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${encoded}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ incident_id: incidentId }),
   })
 }

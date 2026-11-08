@@ -45,7 +45,6 @@ cp .env.example .env
 | `OPENAI_API_KEY` | AI model API key | Yes |
 | `OPENAI_BASE_URL` | OpenAI-compatible API base URL | Yes |
 | `OPENAI_MODEL_NAME` | Model name with image input support | Yes |
-| `WEB_USERNAME` / `WEB_PASSWORD` | Web UI login credentials, default `admin/admin123` | No |
 
 See "Configuration" below for the rest.
 
@@ -307,3 +306,5 @@ Also thanks to ClaudeCode/Gemini/Codex and other model tools for freeing our han
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Usagi-org/ai-goofish-monitor&type=Date)](https://www.star-history.com/#Usagi-org/ai-goofish-monitor&Date)
+
+The LAN dashboard and browser desktop open directly without project or gateway credentials. Complete Goofish login yourself, then click the handoff confirmation button.

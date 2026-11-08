@@ -1,12 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
-if [ "${#BROWSER_PASSWORD}" -lt 12 ]; then
-    echo 'BROWSER_PASSWORD must contain at least 12 characters.' >&2
-    exit 1
-fi
-printf '%s\n' "$BROWSER_PASSWORD" | htpasswd -ci /tmp/browser.htpasswd browser >/dev/null 2>&1
-unset BROWSER_PASSWORD
 mkdir -p /tmp/nginx /config/chromium
 exec 9>/config/.browser-owner.lock
 if ! flock -n 9; then

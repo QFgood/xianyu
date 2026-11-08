@@ -36,4 +36,4 @@
 ## 安全与配置提示
 - 复制 `.env.example` 为 `.env`，设置必填项 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL_NAME` 等。
 - 不要提交真实凭据或 cookies（如 `state.json`）；Playwright 需本地浏览器，Docker 镜像已预装 Chromium。
-- Web 认证默认 `admin/admin123`，生产环境务必修改，推荐启用 HTTPS 并限制访问来源。
+- Web 面板与浏览器桌面采用局域网免认证访问；闲鱼账号由用户在浏览器页面中直接登录。

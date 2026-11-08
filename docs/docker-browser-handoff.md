@@ -1,6 +1,6 @@
 # Docker 浏览器与人工接管
 
-Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通知；`browser` 提供 Chromium 和受密码保护的 noVNC 网页桌面。应用镜像不再安装 Chromium，通过 Docker 内网 CDP 使用浏览器容器的默认持久化上下文。无需插件复制登录态。
+Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通知；`browser` 提供 Chromium 和免密码的 noVNC 网页桌面。应用镜像不再安装 Chromium，通过 Docker 内网 CDP 使用浏览器容器的默认持久化上下文。无需插件复制登录态。
 
 ## NAS 升级
 
@@ -12,11 +12,10 @@ Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通�
    ```dotenv
    APP_PORT=8001
    BROWSER_PORT=7900
-   BROWSER_PASSWORD=请在NAS本地设置至少12位的强密码
    BROWSER_PUBLIC_URL=http://192.168.9.202:7900/vnc.html?autoconnect=1&resize=remote
    ```
 
-   `BROWSER_PASSWORD` 不能留空。浏览器桌面用户名固定为 `browser`。这是桌面密码，与监控面板 `WEB_USERNAME` / `WEB_PASSWORD` 分开；不要把密码或 Cookie 发送到聊天中。
+   浏览器桌面和项目面板都不需要网关账号密码。旧配置中的 `BROWSER_PASSWORD`、`WEB_USERNAME`、`WEB_PASSWORD` 已不再使用，可以删除；不影响浏览器卷中的闲鱼登录状态。
 3. 合并后的 GitHub Actions 会构建 app、base、browser 镜像。确认三个构建完成后执行：
 
    ```bash
@@ -30,8 +29,8 @@ Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通�
 
    默认镜像属于本 fork：`ghcr.io/qfgood/ai-goofish`、`ghcr.io/qfgood/ai-goofish-browser`。可用 `APP_IMAGE` / `BROWSER_IMAGE` 指定对应合并 SHA 标签，避免升级时混用不同版本。
 4. 打开监控面板 `http://192.168.9.202:8001` 的“账号管理”，点击“打开浏览器桌面”。也可直接访问 `http://192.168.9.202:7900/vnc.html?autoconnect=1&resize=remote`。
-5. 使用桌面账号 `browser` 和 `BROWSER_PASSWORD` 进入，在浏览器地址栏打开 `https://www.goofish.com/`，由本人正常登录并完成平台要求的验证。
-6. 返回账号页，输入**监控面板管理员密码**，点击“已完成登录/验证，恢复任务”。这会确认会话可交给自动化并检查 CDP 连接，不会立即启动任务、访问闲鱼或自动尝试验证码。之后可手动运行原任务，或等下一次调度。
+5. 直接进入桌面，在浏览器地址栏打开 `https://www.goofish.com/`，由本人正常登录并完成平台要求的验证。
+6. 返回账号页，直接点击“已完成登录/验证，恢复任务”。这会确认会话可交给自动化并检查 CDP 连接，不会立即启动任务、访问闲鱼或自动尝试验证码。之后可手动运行原任务，或等下一次调度。
 
 部署时浏览器默认打开闲鱼首页；开发验收使用 `BROWSER_START_URL=about:blank`，没有访问真实账号或平台验证。
 
@@ -54,22 +53,22 @@ Docker 部署改为两个服务：`app` 提供监控面板、任务、AI 与通�
 
 每个事件只尝试发送一次企业微信求助，避免定时重复轰炸。发送失败或未配置机器人时仍保持暂停，账号页显示失败提示；不会把通知失败当作恢复依据。通知中不包含 Cookie、网页截图或带验证令牌的挑战地址。通知入口为 NAS 内网地址，手机须能访问该内网。
 
-## 接口与访问保护
+## 局域网接口
 
 - `GET /api/browser/status`：远程模式、持久化状态、事件 ID、是否忙碌、桌面入口及通知状态，不返回 Cookie、CDP 连接地址或密码。
-- `POST /api/browser/ready`：请求体 `{"incident_id":"当前事件ID"}`，需要监控面板管理员 HTTP Basic 凭据。浏览器可连接且没有正在运行的持有者时才接受。
-- `POST /api/browser/pause`：同样需要管理员凭据和当前事件 ID。仅在浏览器空闲时进入人工接管状态。
+- `POST /api/browser/ready`：请求体 `{"incident_id":"当前事件ID"}`，无需认证。浏览器可连接且没有正在运行的持有者时才接受。
+- `POST /api/browser/pause`：只需当前事件 ID，无需认证。仅在浏览器空闲时进入人工接管状态。
 - 正在采集或事件 ID 已变化时返回 409，避免旧页面误确认新事件。浏览器不可达返回 503，并保留原等待状态。
 
-网页桌面 7900 端口全程由 HTTP Basic 保护，VNC 仅监听容器回环地址。CDP 9223 仅在 Compose 网络内使用，**不发布到 NAS 宿主机**。浏览器容器以非 root 用户运行、移除 Linux capabilities 并启用 no-new-privileges；Chromium 在容器内使用 no-sandbox，容器承担进程隔离。仅向可信内网开放桌面端口，跨公网访问需通过受保护的 HTTPS 反向代理或 VPN；浏览器资料卷应按账号凭据数据保护。
+网页桌面 7900 端口直接访问，不设置 HTTP Basic。VNC 仅监听容器回环地址。CDP 9223 仅在 Compose 网络内使用，**不发布到 NAS 宿主机**。浏览器容器以非 root 用户运行、移除 Linux capabilities 并启用 no-new-privileges；Chromium 在容器内使用 no-sandbox，容器承担进程隔离。面板、网页桌面及接管接口按用户要求用于局域网直接访问。
 
 ## 验收与限制
 
-- `python -m pytest -m 'not live and not live_slow'`：237 passed，3 live tests deselected。
+- `python -m pytest -m 'not live and not live_slow'`：238 passed，3 live tests deselected。
 - `cd web-ui && npm ci && npm run build`：通过。
-- 已构建浏览器镜像并启动实际 Chromium、Xvfb、x11vnc、websockify、nginx：无凭据桌面返回 401，正确凭据返回 200；WebSocket 成功收到 VNC RFB 握手。
+- 已构建浏览器镜像并启动实际 Chromium、Xvfb、x11vnc、websockify、nginx：无凭据桌面直接返回 200；WebSocket 成功收到 VNC RFB 握手。
 - 实际 Playwright CDP 连接通过；合成测试 Cookie 在断开重连及浏览器重启后保留。
-- 在实际 Chromium 中运行账号页：等待验证状态、旧插件提示隐藏、管理员确认恢复、手动暂停均通过。截图见 [浏览器人工接管](screenshots/browser-handoff.png)。页面资源和 API 由测试域名转发到隔离的本地测试服务，未连接真实闲鱼账号。
+- 在实际 Chromium 中运行账号页：等待验证状态、旧插件提示隐藏、直接点击确认恢复、手动暂停均通过。截图见 [浏览器人工接管](screenshots/browser-handoff.png)。页面资源和 API 由测试域名转发到隔离的本地测试服务，未连接真实闲鱼账号。
 - 云开发环境使用 VFS 存储，普通测试容器创建因磁盘容量失败并留下孤立副本；自动审批拒绝直接删除 Docker 内部目录，已保留它们。后续用小型测试容器只读挂载本次构建产物、独立可写临时目录和测试配置卷运行相同浏览器组件。该方式验证了启动与会话行为，没有把它描述为 NAS 原生 Compose 的端到端验收。GitHub 镜像流水线另增加标准容器启动检查，通过后才发布 browser 镜像。
 - 未访问或安装到用户 NAS，未进行真实登录、验证码操作、模型调用或企业微信真实推送；这些需要 NAS 部署后由本人验收。浏览器迁移不能保证消除平台验证。
 

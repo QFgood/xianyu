@@ -1,11 +1,9 @@
-import { useAuth } from '@/composables/useAuth'
 
 interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
 export async function http(url: string, options: FetchOptions = {}) {
-  const { logout } = useAuth()
   
   const headers = new Headers(options.headers)
 
@@ -30,13 +28,6 @@ export async function http(url: string, options: FetchOptions = {}) {
   }
 
   const response = await fetch(fullUrl, config)
-
-  if (response.status === 401) {
-    // Basic Auth failed or session expired
-    logout()
-    // Optional: Redirect to login handled by router or state change
-    throw new Error('Unauthorized')
-  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
