@@ -45,6 +45,13 @@ class BrowserStateConflict(RuntimeError):
     pass
 
 
+class BrowserConnectionError(RuntimeError):
+    """A controlled connection-stage error, without URLs, tokens or raw replies."""
+    def __init__(self, code: str, hint: str):
+        self.code = code
+        super().__init__(f'浏览器控制连接失败 [{code}]：{hint}')
+
+
 class BrowserSessionControl:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or get_database_path()
@@ -138,22 +145,43 @@ class BrowserSessionControl:
 
 
 async def connect_remote_browser(playwright):
-    endpoint = os.getenv('BROWSER_CDP_URL', 'http://browser:9223').rstrip('/')
-    parsed = urlsplit(endpoint)
+    endpoint = os.getenv('BROWSER_CDP_URL', 'http://browser:9223').strip().rstrip('/')
+    try:
+        parsed = urlsplit(endpoint)
+        parsed.port  # Validate malformed ports before starting a connection.
+    except ValueError:
+        raise BrowserConnectionError('cdp_config_invalid', 'BROWSER_CDP_URL 的主机或端口格式不正确。') from None
     if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError('Invalid BROWSER_CDP_URL')
-    # Chrome only accepts localhost/IP Host values on the discovery endpoint.
-    # Connect via Docker DNS, then rewrite only the advertised websocket authority.
-    async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
-        response = await client.get(endpoint + '/json/version', headers={'Host': 'localhost'})
-        response.raise_for_status()
-        advertised = urlsplit(response.json()['webSocketDebuggerUrl'])
+        raise BrowserConnectionError('cdp_config_invalid', '请检查 BROWSER_CDP_URL，应指向浏览器控制端口，例如 http://browser:9223。')
+    # Chrome validates Host for BOTH discovery and WebSocket upgrade requests.
+    # Connect via Docker DNS while using an accepted Host on both transports.
+    headers = {'Host': 'localhost'}
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            response = await client.get(endpoint + '/json/version', headers=headers)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise BrowserConnectionError('cdp_discovery_http_error', f'控制端口返回 HTTP {exc.response.status_code}，请确认地址指向 CDP，而非网页桌面端口。') from None
+    except httpx.HTTPError:
+        raise BrowserConnectionError('cdp_discovery_unreachable', '无法访问控制端口，请检查 app 与 browser 的 Docker 网络及 BROWSER_CDP_URL。') from None
+    except httpx.InvalidURL:
+        raise BrowserConnectionError('cdp_config_invalid', 'BROWSER_CDP_URL 格式不正确。') from None
+    try:
+        advertised_url = response.json()['webSocketDebuggerUrl']
+        if not isinstance(advertised_url, str):
+            raise ValueError('Missing websocket URL')
+        advertised = urlsplit(advertised_url)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise BrowserConnectionError('cdp_discovery_invalid', '控制端口未返回有效 CDP 元数据，请勿把 7900 网页桌面地址配置为控制地址。') from None
     if not advertised.path.startswith('/devtools/browser/'):
-        raise ValueError('Invalid browser discovery response')
+        raise BrowserConnectionError('cdp_discovery_invalid', '浏览器未返回有效的控制会话地址。')
     websocket = urlunsplit(('wss' if parsed.scheme == 'https' else 'ws', parsed.netloc, advertised.path, '', ''))
-    browser = await playwright.chromium.connect_over_cdp(websocket, timeout=15000)
+    try:
+        browser = await playwright.chromium.connect_over_cdp(websocket, headers=headers, timeout=15000)
+    except Exception:
+        raise BrowserConnectionError('cdp_websocket_failed', 'HTTP 探测已成功，但 WebSocket 握手失败，请确认 app 已更新到修复握手 Host 的版本。') from None
     if not browser.contexts:
-        raise RuntimeError('Persistent browser context is unavailable')
+        raise BrowserConnectionError('cdp_context_missing', '已连接浏览器，但没有持久化上下文，请检查 browser 镜像和资料卷配置。')
     return browser, browser.contexts[0]
 
 

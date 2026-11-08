@@ -90,7 +90,7 @@ def test_cdp_discovery_rewrites_only_authority_and_uses_existing_context(monkeyp
     connect = AsyncMock(return_value=browser)
     actual = asyncio.run(connect_remote_browser(SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))))
     assert actual == (browser, context)
-    connect.assert_awaited_once_with('ws://browser:9223/devtools/browser/test-id', timeout=15000)
+    connect.assert_awaited_once_with('ws://browser:9223/devtools/browser/test-id', headers={'Host': 'localhost'}, timeout=15000)
     assert captured[0].headers['host'] == 'localhost'
 
 
@@ -116,3 +116,42 @@ def test_browser_state_does_not_expire_or_recover_from_unrelated_cookie_files(tm
     with pytest.raises(BrowserStateConflict):
         control.acknowledge('0' * 32)
     assert control.read()['incident_id'] == incident['incident_id']
+
+
+@pytest.mark.parametrize('failure,expected', [
+    ('unreachable', 'cdp_discovery_unreachable'),
+    ('http_error', 'cdp_discovery_http_error'),
+    ('invalid_json', 'cdp_discovery_invalid'),
+    ('websocket', 'cdp_websocket_failed'),
+    ('context', 'cdp_context_missing'),
+])
+def test_cdp_errors_identify_stage_without_exposing_tokens(monkeypatch, failure, expected):
+    import httpx
+    from src.services.browser_session_service import BrowserConnectionError
+    secret = 'sensitive-debugger-token'
+    def respond(request):
+        if failure == 'unreachable':
+            raise httpx.ConnectError(secret)
+        if failure == 'http_error':
+            return httpx.Response(500, text=secret)
+        if failure == 'invalid_json':
+            return httpx.Response(200, text='<html>' + secret + '</html>')
+        return httpx.Response(200, json={'webSocketDebuggerUrl': 'ws://localhost/devtools/browser/' + secret})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setenv('BROWSER_CDP_URL', 'http://browser:9223')
+    connect = AsyncMock(side_effect=RuntimeError(secret)) if failure == 'websocket' else AsyncMock(return_value=SimpleNamespace(contexts=[]))
+    with pytest.raises(BrowserConnectionError) as caught:
+        asyncio.run(connect_remote_browser(SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))))
+    assert caught.value.code == expected
+    assert secret not in str(caught.value)
+
+
+@pytest.mark.parametrize('endpoint', ['http://browser:invalid', 'http://private:secret@browser:9223'])
+def test_cdp_invalid_endpoint_reports_configuration_error(monkeypatch, endpoint):
+    from src.services.browser_session_service import BrowserConnectionError
+    monkeypatch.setenv('BROWSER_CDP_URL', endpoint)
+    with pytest.raises(BrowserConnectionError) as caught:
+        asyncio.run(connect_remote_browser(None))
+    assert caught.value.code == 'cdp_config_invalid'
+    assert 'secret' not in str(caught.value)

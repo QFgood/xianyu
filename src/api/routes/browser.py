@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.services.browser_session_service import (
-    BrowserSessionControl, BrowserBusyError, BrowserStateConflict,
+    BrowserSessionControl, BrowserBusyError, BrowserStateConflict, BrowserConnectionError,
     connect_remote_browser, public_browser_url, remote_browser_enabled,
 )
 
@@ -32,8 +32,12 @@ async def reachable():
         async with async_playwright() as playwright:
             await connect_remote_browser(playwright)
             # Exit disconnects the CDP client; never send Browser.close.
-    except Exception:
-        raise HTTPException(503, '浏览器连接失败，请先确认浏览器容器正在运行。') from None
+    except BrowserConnectionError as exc:
+        print(f'browser.connect_failed code={exc.code}')
+        raise HTTPException(503, str(exc)) from None
+    except Exception as exc:
+        print(f'browser.connect_failed code=cdp_driver_error error={type(exc).__name__}')
+        raise HTTPException(503, '浏览器控制驱动启动失败 [cdp_driver_error]，请检查 app 容器的 Playwright 运行环境。') from None
 
 
 async def transition(data: Confirmation, ready: bool):

@@ -63,3 +63,23 @@ def test_dashboard_auth_status_is_public_compatibility_endpoint():
         assert response.status_code == 200
         assert response.json()['authentication_required'] is False
         assert 'www-authenticate' not in response.headers
+
+
+def test_handoff_reports_websocket_failure_and_preserves_wait_state(client, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from src.services.browser_session_service import BrowserConnectionError
+    class FakePlaywright:
+        async def __aenter__(self):
+            return SimpleNamespace()
+        async def __aexit__(self, *_):
+            pass
+    monkeypatch.setattr(browser, 'async_playwright', FakePlaywright)
+    monkeypatch.setattr(browser, 'connect_remote_browser', AsyncMock(side_effect=BrowserConnectionError('cdp_websocket_failed', 'HTTP 探测成功，但 WebSocket 握手失败。')))
+    initial = client.get('/api/browser/status').json()
+    response = client.post('/api/browser/ready', json={'incident_id': initial['incident_id']})
+    assert response.status_code == 503
+    assert 'cdp_websocket_failed' in response.json()['detail']
+    assert 'WebSocket' in response.json()['detail']
+    assert client.get('/api/browser/status').json()['incident_id'] == initial['incident_id']
+    assert client.get('/api/browser/status').json()['state'] == 'needs_login'
