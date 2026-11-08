@@ -79,7 +79,7 @@ pytest tests/unit/test_utils.py::test_safe_get  # 运行单个测试函数
 - AI 模型：`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL_NAME`
 - 通知：`NTFY_TOPIC_URL`, `BARK_URL`, `WX_BOT_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - 爬虫：`RUN_HEADLESS`, `LOGIN_IS_EDGE`
-- Web 认证：`WEB_USERNAME`, `WEB_PASSWORD`
+- Web 面板与浏览器桌面：局域网直接访问，无项目或网关密码。
 - 端口：`SERVER_PORT`
 
 任务配置 (`config.json`)：定义监控任务（关键词、价格范围、cron 表达式、AI prompt 文件等）

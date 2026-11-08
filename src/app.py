@@ -133,22 +133,14 @@ async def health_check():
     return {"status": "healthy", "message": "服务正常运行"}
 
 
-# 认证状态检查端点
-from fastapi import Request, HTTPException
+# Compatibility endpoint for older clients; the LAN service has no login gate.
+from fastapi import Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
+@app.get("/auth/status")
 @app.post("/auth/status")
-async def auth_status(payload: LoginRequest):
-    """检查认证状态"""
-    if payload.username == app_settings.web_username and payload.password == app_settings.web_password:
-        return {"authenticated": True, "username": payload.username}
-    raise HTTPException(status_code=401, detail="认证失败")
+async def auth_status():
+    return {"authenticated": True, "authentication_required": False, "username": "LAN"}
 
 
 # 主页路由 - 服务 Vue 3 SPA

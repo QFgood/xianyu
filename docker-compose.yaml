@@ -33,8 +33,6 @@ services:
     image: ${BROWSER_IMAGE:-ghcr.io/qfgood/ai-goofish-browser:latest}
     build: ./docker/browser
     init: true
-    environment:
-      BROWSER_PASSWORD: ${BROWSER_PASSWORD:?Set BROWSER_PASSWORD to a strong password of at least 12 characters}
     ports:
       - "${BROWSER_PORT:-7900}:7900"
     expose:

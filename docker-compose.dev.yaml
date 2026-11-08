@@ -23,8 +23,6 @@ services:
 
   browser:
     build: ./docker/browser
-    environment:
-      BROWSER_PASSWORD: ${BROWSER_PASSWORD:?Set BROWSER_PASSWORD with at least 12 characters}
     ports:
       - "${BROWSER_PORT:-7900}:7900"
     volumes:

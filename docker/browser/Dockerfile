@@ -3,7 +3,7 @@ ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 HOME=/config
 COPY --chmod=644 nginx.conf /tmp/browser-nginx.conf
 COPY --chmod=755 start.sh /usr/local/bin/start-browser
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium xvfb openbox x11vnc novnc websockify socat nginx-light apache2-utils \
+    chromium xvfb openbox x11vnc novnc websockify socat nginx-light \
     python3 ca-certificates fonts-noto-cjk tini util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 1000 --home-dir /config browser \

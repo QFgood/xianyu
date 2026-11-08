@@ -1,28 +1,16 @@
 """Human-operated browser handoff controls; no CAPTCHA automation."""
 import asyncio
-import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import APIRouter, HTTPException
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.infrastructure.config.settings import get_settings
 from src.services.browser_session_service import (
     BrowserSessionControl, BrowserBusyError, BrowserStateConflict,
     connect_remote_browser, public_browser_url, remote_browser_enabled,
 )
 
 router = APIRouter(prefix='/api/browser', tags=['browser'])
-basic = HTTPBasic()
-
-
-def require_admin(credentials: HTTPBasicCredentials = Depends(basic)):
-    settings = get_settings()
-    correct_user = secrets.compare_digest(credentials.username.encode(), settings.web_username.encode())
-    correct_password = secrets.compare_digest(credentials.password.encode(), settings.web_password.encode())
-    if not (correct_user and correct_password):
-        raise HTTPException(401, 'Authentication required', headers={'WWW-Authenticate': 'Basic'})
 
 
 class Confirmation(BaseModel):
@@ -64,11 +52,11 @@ async def transition(data: Confirmation, ready: bool):
         raise HTTPException(409, '浏览器状态已变化，请刷新后再确认。') from None
 
 
-@router.post('/ready', dependencies=[Depends(require_admin)])
+@router.post('/ready')
 async def ready(data: Confirmation):
     return await transition(data, True)
 
 
-@router.post('/pause', dependencies=[Depends(require_admin)])
+@router.post('/pause')
 async def pause(data: Confirmation):
     return await transition(data, False)

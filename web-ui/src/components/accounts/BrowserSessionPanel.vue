@@ -2,16 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getBrowserStatus, updateBrowserState, type BrowserStatus } from '@/api/browser'
-import { useAuth } from '@/composables/useAuth'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const emit = defineEmits<{ (e: 'mode', enabled: boolean): void }>()
 const { t } = useI18n()
-const { username } = useAuth()
 const status = ref<BrowserStatus | null>(null)
-const password = ref('')
 const error = ref('')
 const saving = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -32,12 +28,11 @@ async function refresh() {
   }
 }
 async function change(action: 'ready' | 'pause') {
-  if (!status.value?.incident_id || !password.value) return
+  if (!status.value?.incident_id) return
   saving.value = true
   error.value = ''
   try {
-    await updateBrowserState(action, status.value.incident_id, username.value || 'admin', password.value)
-    password.value = ''
+    await updateBrowserState(action, status.value.incident_id)
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -70,11 +65,9 @@ onUnmounted(() => { mounted = false; clearInterval(timer) })
         <a :href="browserUrl" target="_blank" rel="noopener noreferrer" class="inline-flex rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">{{ t('browserSession.open') }}</a>
         <p v-if="status.notification === 'failed'" class="text-sm text-amber-800">{{ t('browserSession.notificationFailed') }}</p>
         <div class="max-w-lg space-y-2 rounded-lg bg-gray-50 p-4">
-          <label for="browser-admin-password" class="block text-sm font-medium">{{ t('browserSession.password') }}</label>
-          <Input id="browser-admin-password" v-model="password" type="password" autocomplete="current-password" :placeholder="t('browserSession.passwordHint')" />
           <div class="flex flex-wrap gap-2">
-            <Button v-if="status.state !== 'ready'" :disabled="saving || status.busy || !password" @click="change('ready')">{{ t('browserSession.confirm') }}</Button>
-            <Button v-else variant="outline" :disabled="saving || status.busy || !password" @click="change('pause')">{{ t('browserSession.pause') }}</Button>
+            <Button v-if="status.state !== 'ready'" :disabled="saving || status.busy" @click="change('ready')">{{ t('browserSession.confirm') }}</Button>
+            <Button v-else variant="outline" :disabled="saving || status.busy" @click="change('pause')">{{ t('browserSession.pause') }}</Button>
             <Button variant="ghost" @click="refresh">{{ t('browserSession.refresh') }}</Button>
           </div>
         </div>
