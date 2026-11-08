@@ -11,7 +11,7 @@
 - 若希望观察全部卖家，请关闭“仅个人卖家”；若不限制运费，请关闭“是否包邮”。已有任务的这些筛选不会被静默修改。
 - 采样页数先用 1–3 页；保留人工验证暂停机制。降低额外页面访问不能保证不再触发平台验证。
 
-行情使用 `prompts/market_prompt.txt`，在“系统设置 → Prompt管理”编辑。旧 `base_prompt` 和购买画像 criteria 文件不会用于行情分类。首次访问 Prompt 列表或首次运行时，从 `static/market_prompt.txt` 初始化，已有同名文件不覆盖。新建任务和编辑目标无需生成购买画像。
+行情内部使用 `prompts/market_prompt.txt`；设置页不再提供 Prompt 管理，日常任务通过商品库配置。旧 `base_prompt` 和购买画像 criteria 文件不会用于行情分类。首次运行时，从 `static/market_prompt.txt` 初始化，已有同名文件不覆盖。新建任务和编辑目标无需生成购买画像。
 
 ## 采集与核对
 

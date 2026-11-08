@@ -7,12 +7,9 @@ import type { NotificationSettingsUpdate, NotificationTestResponse } from '@/api
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toast'
-import { getPromptContent, listPrompts, updatePrompt } from '@/api/prompts'
 import NotificationSettingsPanel from '@/components/settings/NotificationSettingsPanel.vue'
 import RotationSettingsPanel from '@/components/settings/RotationSettingsPanel.vue'
 const { t } = useI18n()
@@ -36,14 +33,7 @@ const {
 
 const activeTab = ref('ai')
 const route = useRoute()
-const validTabs = new Set(['notifications', 'ai', 'rotation', 'status', 'prompts'])
-
-const promptFiles = ref<string[]>([])
-const selectedPrompt = ref<string | null>(null)
-const promptContent = ref('')
-const isPromptLoading = ref(false)
-const isPromptSaving = ref(false)
-const promptError = ref<string | null>(null)
+const validTabs = new Set(['notifications', 'ai', 'rotation', 'status'])
 
 function notifySuccess(title: string, description?: string) {
   toast({ title, description })
@@ -102,80 +92,14 @@ async function handleTestAi() {
   }
 }
 
-async function fetchPrompts() {
-  isPromptLoading.value = true
-  promptError.value = null
-  try {
-    const files = await listPrompts()
-    promptFiles.value = files
-
-    if (selectedPrompt.value && files.includes(selectedPrompt.value)) {
-      return
-    }
-
-    const lastSelected = localStorage.getItem('lastSelectedPrompt')
-    if (lastSelected && files.includes(lastSelected)) {
-      selectedPrompt.value = lastSelected
-      return
-    }
-
-    selectedPrompt.value = files[0] || null
-  } catch (e) {
-    promptError.value = (e as Error).message || t('settings.prompts.promptListFailed')
-  } finally {
-    isPromptLoading.value = false
-  }
-}
-
-async function handleSavePrompt() {
-  if (!selectedPrompt.value) {
-    notifyError(t('settings.prompts.selectPromptFile'))
-    return
-  }
-  isPromptSaving.value = true
-  try {
-    const res = await updatePrompt(selectedPrompt.value, promptContent.value)
-    notifySuccess(t('settings.prompts.saveSuccess'), res.message)
-  } catch (e) {
-    notifyError(t('settings.prompts.saveFailed'), (e as Error).message)
-  } finally {
-    isPromptSaving.value = false
-  }
-}
-
-watch(activeTab, (tab) => {
-  if (tab === 'prompts') {
-    fetchPrompts()
-  }
-})
-
 watch(
   () => route.query.tab,
   (tab) => {
-    if (typeof tab === 'string' && validTabs.has(tab)) {
-      activeTab.value = tab
-    }
+    activeTab.value = typeof tab === 'string' && validTabs.has(tab) ? tab : 'ai'
   },
   { immediate: true }
 )
 
-watch(selectedPrompt, async (value) => {
-  if (!value) {
-    promptContent.value = ''
-    return
-  }
-  localStorage.setItem('lastSelectedPrompt', value)
-  isPromptLoading.value = true
-  promptError.value = null
-  try {
-    const data = await getPromptContent(value)
-    promptContent.value = data.content
-  } catch (e) {
-    promptError.value = (e as Error).message || t('settings.prompts.promptContentFailed')
-  } finally {
-    isPromptLoading.value = false
-  }
-})
 </script>
 
 <template>
@@ -192,7 +116,6 @@ watch(selectedPrompt, async (value) => {
         <TabsTrigger class="shrink-0" value="rotation">{{ t('settings.tabs.rotation') }}</TabsTrigger>
         <TabsTrigger class="shrink-0" value="notifications">{{ t('settings.tabs.notifications') }}</TabsTrigger>
         <TabsTrigger class="shrink-0" value="status">{{ t('settings.tabs.status') }}</TabsTrigger>
-        <TabsTrigger class="shrink-0" value="prompts">{{ t('settings.tabs.prompts') }}</TabsTrigger>
       </TabsList>
 
       <!-- AI Tab -->
@@ -323,55 +246,6 @@ watch(selectedPrompt, async (value) => {
         </Card>
       </TabsContent>
 
-      <!-- Prompt Tab -->
-      <TabsContent value="prompts">
-        <Card>
-          <CardHeader>
-            <CardTitle>{{ t('settings.prompts.title') }}</CardTitle>
-            <CardDescription>{{ t('settings.prompts.description') }}</CardDescription>
-          </CardHeader>
-          <CardContent class="space-y-4">
-            <div v-if="promptError" class="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded">
-              {{ promptError }}
-            </div>
-
-            <div class="grid gap-2">
-              <Label>{{ t('settings.prompts.selectFile') }}</Label>
-              <Select
-                :model-value="selectedPrompt || undefined"
-                @update:model-value="(value) => selectedPrompt = value as string"
-              >
-                <SelectTrigger>
-                  <SelectValue :placeholder="t('settings.prompts.placeholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="file in promptFiles" :key="file" :value="file">
-                    {{ file }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p v-if="!promptFiles.length && !isPromptLoading" class="text-sm text-gray-500">
-                {{ t('settings.prompts.none') }}
-              </p>
-            </div>
-
-            <div class="grid gap-2">
-              <Label>{{ t('settings.prompts.content') }}</Label>
-              <Textarea
-                v-model="promptContent"
-                class="min-h-[240px]"
-                :disabled="!selectedPrompt || isPromptLoading"
-                :placeholder="t('settings.prompts.contentPlaceholder')"
-              />
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button :disabled="isPromptSaving || !selectedPrompt" @click="handleSavePrompt">
-              {{ isPromptSaving ? t('common.saving') : t('settings.prompts.save') }}
-            </Button>
-          </CardFooter>
-        </Card>
-      </TabsContent>
     </Tabs>
   </div>
 </template>

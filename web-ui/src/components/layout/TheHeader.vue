@@ -9,7 +9,6 @@ import {
   Bell, 
   Search, 
   UserCircle,
-  HelpCircle,
   Menu
 } from 'lucide-vue-next'
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -32,9 +31,6 @@ function goNotifications() {
   router.push({ name: 'Settings', query: { tab: 'notifications' } })
 }
 
-function goPrompts() {
-  router.push({ name: 'Settings', query: { tab: 'prompts' } })
-}
 </script>
 
 <template>
@@ -49,7 +45,7 @@ function goPrompts() {
         <Zap class="w-5 h-5 text-white fill-white" />
       </div>
       <h1 class="text-lg font-black text-slate-800 tracking-tighter">
-        AI <span class="text-primary">Xianyu</span> Hunter
+        agent <span class="text-primary">xianyu</span>
       </h1>
       <Badge variant="outline" class="ml-2 text-[10px] font-bold border-primary/20 text-primary bg-primary/5 uppercase tracking-widest hidden sm:flex">
         PRO
@@ -90,15 +86,6 @@ function goPrompts() {
            @click="goNotifications"
          >
             <Bell class="w-5 h-5" />
-         </Button>
-         <Button
-           variant="ghost"
-           size="icon"
-           class="rounded-full text-slate-500 hover:text-primary hover:bg-primary/10"
-           :aria-label="t('header.openPrompts')"
-           @click="goPrompts"
-         >
-            <HelpCircle class="w-5 h-5" />
          </Button>
       </div>
       
