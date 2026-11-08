@@ -28,7 +28,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     RUNNING_IN_DOCKER=true \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    BROWSER_MODE=remote \
+    BROWSER_CDP_URL=http://browser:9223 \
     TZ=Asia/Shanghai
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
@@ -38,7 +39,6 @@ RUN apt-get update \
         tzdata \
         tini \
         libzbar0 \
-    && playwright install --with-deps --no-shell chromium \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

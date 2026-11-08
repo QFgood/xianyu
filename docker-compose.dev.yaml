@@ -4,10 +4,35 @@ services:
     container_name: ai-goofish-monitor-app
     init: true
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8001}:8000"
     env_file:
       - .env
+    environment:
+      SERVER_PORT: 8000
+      APP_DATABASE_FILE: /app/data/app.sqlite3
+      BROWSER_MODE: remote
+      BROWSER_CDP_URL: http://browser:9223
+      BROWSER_PUBLIC_URL: ${BROWSER_PUBLIC_URL:-http://192.168.9.202:7900/vnc.html?autoconnect=1&resize=remote}
+    depends_on:
+      browser:
+        condition: service_healthy
     volumes:
       - .:/app
       - /app/dist
     restart: unless-stopped
+
+  browser:
+    build: ./docker/browser
+    environment:
+      BROWSER_PASSWORD: ${BROWSER_PASSWORD:?Set BROWSER_PASSWORD with at least 12 characters}
+    ports:
+      - "${BROWSER_PORT:-7900}:7900"
+    volumes:
+      - browser-profile:/config
+    shm_size: 1gb
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+volumes:
+  browser-profile:

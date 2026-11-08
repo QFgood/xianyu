@@ -45,6 +45,7 @@ class ItemAnalysisDispatcher:
         ai_analyzer: AIAnalyzer,
         notifier: Notifier,
         saver: Saver,
+        stop_requested: Callable[[], bool] | None = None,
     ) -> None:
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
         self._skip_ai_analysis = skip_ai_analysis
@@ -53,6 +54,7 @@ class ItemAnalysisDispatcher:
         self._ai_analyzer = ai_analyzer
         self._notifier = notifier
         self._saver = saver
+        self._stop_requested = stop_requested or (lambda: False)
         self._tasks: set[asyncio.Task] = set()
         self.completed_count = 0
 
@@ -65,18 +67,32 @@ class ItemAnalysisDispatcher:
         while self._tasks:
             await asyncio.gather(*tuple(self._tasks))
 
+    async def cancel_pending(self) -> None:
+        tasks = tuple(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _process_with_limit(self, job: ItemAnalysisJob) -> None:
         async with self._semaphore:
             await self._process_job(job)
 
     async def _process_job(self, job: ItemAnalysisJob) -> None:
+        if self._stop_requested():
+            return
         record = copy.deepcopy(job.final_record)
         item_data = record.get("商品信息", {}) or {}
         record["卖家信息"] = await self._load_seller_info(job)
+        if self._stop_requested():
+            return
         record["ai_analysis"] = await self._build_analysis_result(job, record)
+        if self._stop_requested():
+            return
         if await self._saver(record, job.keyword):
             self.completed_count += 1
-        await self._notify_if_recommended(item_data, record["ai_analysis"])
+        if not self._stop_requested():
+            await self._notify_if_recommended(item_data, record["ai_analysis"])
 
     async def _load_seller_info(self, job: ItemAnalysisJob) -> dict:
         seller_info = {}
@@ -124,6 +140,8 @@ class ItemAnalysisDispatcher:
         image_paths: list[str] = []
         try:
             image_paths = await self._download_images(job, record)
+            if self._stop_requested():
+                return self._build_ai_error_result("浏览器等待人工处理，分析已暂停。")
             if not job.prompt_text:
                 return self._build_ai_error_result("任务未配置AI prompt，跳过分析。")
             ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text)

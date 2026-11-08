@@ -71,7 +71,7 @@ class NotificationClient(ABC):
 
         short_title = title[:30]
         suffix = "..." if len(title) > 30 else ""
-        notification_title = f"🚨 新推荐! {short_title}{suffix}"
+        notification_title = product_data.get('通知标题') or f"🚨 新推荐! {short_title}{suffix}"
 
         main_image = product_data.get('商品主图链接')
         if not main_image:

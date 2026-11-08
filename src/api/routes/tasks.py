@@ -27,6 +27,8 @@ from src.utils import resolve_task_log_path
 from src.services.account_strategy_service import normalize_account_strategy
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.price_history_service import delete_price_snapshots
+from src.services.browser_session_service import BrowserSessionControl, remote_browser_enabled
+import asyncio
 from src.services.result_storage_service import delete_result_file_records
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -263,6 +265,13 @@ async def start_task(
         raise HTTPException(status_code=400, detail="任务已被禁用，无法启动")
     if task.is_running:
         raise HTTPException(status_code=400, detail="任务已在运行中")
+    if remote_browser_enabled():
+        control = BrowserSessionControl()
+        state = await asyncio.to_thread(control.read)
+        if state['state'] != 'ready':
+            raise HTTPException(409, '浏览器等待人工登录或验证，请到账号管理页处理。')
+        if await asyncio.to_thread(control.busy):
+            raise HTTPException(409, '共享浏览器正在使用，请稍后再运行任务。')
     success = await process_service.start_task(task_id, task.task_name)
     if not success:
         raise HTTPException(status_code=500, detail="启动任务失败")

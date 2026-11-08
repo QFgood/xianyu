@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { getBrowserStatus } from '@/api/browser'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '@/types/task.d.ts'
 import {
@@ -54,13 +55,19 @@ onBeforeUnmount(() => {
   }
 })
 
+const remoteBrowser = ref(false)
+onMounted(async () => {
+  try { remoteBrowser.value = (await getBrowserStatus()).enabled } catch { /* local compatibility */ }
+})
 const resolveAccountStrategyLabel = (task: Task) => {
+  if (remoteBrowser.value) return t('browserSession.sharedAccount')
   if (task.account_strategy === 'rotate') return t('tasks.table.accountRotate')
   if (task.account_strategy === 'fixed') return t('tasks.table.accountFixed')
   return t('tasks.table.accountAuto')
 }
 
 const resolveAccountName = (task: Task) => {
+  if (remoteBrowser.value) return t('browserSession.currentLogin')
   if (!task.account_state_file) return t('tasks.table.systemSelected')
   const segments = task.account_state_file.split('/')
   const filename = segments[segments.length - 1] || task.account_state_file

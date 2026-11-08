@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Awaitable, Callable, Dict, TextIO
 
 from src.ai_handler import send_ntfy_notification
+from src.services.browser_session_service import BrowserSessionControl, remote_browser_enabled, VALIDATION_MARKERS
 from src.config import STATE_FILE
 from src.failure_guard import FailureGuard
 from src.infrastructure.persistence.sqlite_task_repository import find_task_by_name_sync
@@ -137,10 +138,19 @@ class ProcessService:
             print(f"任务 '{task_name}' (ID: {task_id}) 已在运行中")
             return False
 
+        if remote_browser_enabled():
+            control = BrowserSessionControl()
+            if (await asyncio.to_thread(control.read))["state"] != "ready" or await asyncio.to_thread(control.busy):
+                print("共享浏览器等待人工处理或正在使用，跳过本次启动。")
+                return False
+
         decision = self.failure_guard.should_skip_start(
             task_name,
             cookie_path=self._resolve_cookie_path(task_name),
         )
+        if remote_browser_enabled() and decision.skip and any(marker in decision.reason for marker in VALIDATION_MARKERS):
+            self.failure_guard.record_success(task_name)
+            decision = self.failure_guard.should_skip_start(task_name)
         if decision.skip:
             await self._notify_skip(task_name, decision)
             return False

@@ -45,13 +45,14 @@ def replay(monkeypatch, tmp_path):
         record_success=lambda *_: None))
     monkeypatch.setattr(scraper, '_notify_task_failure', AsyncMock(side_effect=AssertionError('unexpected scrape failure')))
     monkeypatch.setattr(scraper, 'random_sleep', AsyncMock())
+    real_sleep = asyncio.sleep
     monkeypatch.setattr(scraper.asyncio, 'sleep', AsyncMock())
     monkeypatch.setattr('builtins.input', lambda *_: '')
     monkeypatch.setattr(scraper, 'prepare_chromium_launch_args', lambda: [])
     monkeypatch.setattr(scraper, 'build_market_reference', lambda **kw: {})
 
     pages = []
-    current = {'page': 0, 'shared_seller': False, 'validation': False}
+    current = {'page': 0, 'shared_seller': False, 'validation': False, 'remote': False, 'seller_validation': False}
     cache_get = scraper.SellerProfileCache.get_or_load
     async def counted_get(cache, seller_id, loader):
         calls['seller_load'].append(seller_id)
@@ -88,6 +89,7 @@ def replay(monkeypatch, tmp_path):
         def __init__(self, search):
             self.search = search
             self.url = ''
+            self.closed = False
         async def goto(self, url, **kwargs):
             self.url = url
             if not self.search:
@@ -105,27 +107,42 @@ def replay(monkeypatch, tmp_path):
             raise scraper.PlaywrightTimeoutError('no verification overlay')
         async def click(self, *a, **kw):
             pass
+        def is_closed(self):
+            return self.closed
         async def close(self):
+            self.closed = True
             if not self.search:
                 calls['closed'].append(self.item_id)
 
     class Context:
         def __init__(self):
             self.first = True
+            self.handlers = {}
+            self.user_page = Page(True)
+            self._pages = [self.user_page] if current['remote'] else []
+        @property
+        def pages(self):
+            return [p for p in self._pages if not p.closed]
+        def on(self, event, callback):
+            self.handlers[event] = callback
+        def remove_listener(self, event, callback):
+            self.handlers.pop(event, None)
         async def new_page(self):
             page = Page(self.first)
             if not self.first:
                 calls['created'].append(1)
             self.first = False
+            self._pages.append(page)
             return page
         async def add_init_script(self, *_):
-            pass
+            calls['scripts'].append(1)
 
     class Browser:
         async def new_context(self, **kwargs):
+            calls['new_context'].append(kwargs)
             return Context()
         async def close(self):
-            pass
+            calls['browser_closed'].append(1)
 
     class Playwright:
         async def __aenter__(self):
@@ -147,6 +164,11 @@ def replay(monkeypatch, tmp_path):
     monkeypatch.setattr(scraper, 'record_market_snapshots', snapshots)
     async def seller(context, seller_id):
         calls['seller'].append(seller_id)
+        if current['seller_validation']:
+            await real_sleep(.05)
+            callback = context.handlers.get('response')
+            if callback:
+                await callback(SimpleNamespace(url='https://h5api.m.goofish.com/h5/seller', json=AsyncMock(return_value={'ret': ['FAIL_SYS_USER_VALIDATE']})))
         return {'卖家昵称': seller_id}
     async def images(item_id, urls, task_name):
         calls['images'].append(item_id)
@@ -164,11 +186,28 @@ def replay(monkeypatch, tmp_path):
     for name, fn in [('scrape_user_profile', seller), ('download_all_images', images), ('get_ai_analysis', ai), ('save_to_jsonl', save), ('send_ntfy_notification', notify)]:
         monkeypatch.setattr(scraper, name, fn)
 
-    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai', validation=False):
+    def run(mode, data=None, debug_limit=0, source=None, shared_seller=False, decision_mode='ai', validation=False, remote=False, seller_validation=False):
         pages[:] = copy.deepcopy(data or [[item(i, title) for i, title in enumerate(TITLES)]])
         current['page'] = 0
         current['shared_seller'] = shared_seller
         current['validation'] = validation
+        current['remote'] = remote
+        current['seller_validation'] = seller_validation
+        if remote:
+            from src.services.browser_session_service import BrowserSessionControl
+            monkeypatch.setenv('BROWSER_MODE', 'remote')
+            control = BrowserSessionControl()
+            session = control.read()
+            if session['reason'] == 'initial_login':
+                control.acknowledge(session['incident_id'])
+            context = Context()
+            calls['persistent_context'].append(context)
+            async def connect(_):
+                calls['cdp'].append(1)
+                return Browser(), context
+            monkeypatch.setattr(scraper, 'connect_remote_browser', connect)
+        else:
+            monkeypatch.setenv('BROWSER_MODE', 'local')
         config = dict(keyword='offline', task_name='offline', max_pages=len(pages), account_strategy='fixed', account_state_file=str(state), personal_only=False, free_shipping=False, ai_prompt_text='original prompt with unchanged criteria', decision_mode=decision_mode, keyword_rules=['mac'], analyze_images=True, prefilter=POLICY | {'mode': mode})
         if source:
             import spider_v2
@@ -362,3 +401,48 @@ def test_detail_validation_stops_attempt_and_pauses_next_run(replay, monkeypatch
     assert run('shadow', data=data, validation=True) == 0
     assert calls['detail'] == ['0']
     assert '"status": "paused"' in capsys.readouterr().out
+
+
+def test_remote_session_reuses_context_without_storage_import_or_closing_browser(replay):
+    run, calls = replay
+    assert run('enforce', remote=True) == 3
+    assert len(calls['cdp']) == 1
+    assert not calls['new_context']
+    assert not calls['scripts']
+    assert not calls['browser_closed']
+    context = calls['persistent_context'][0]
+    assert context.pages == [context.user_page]
+    assert calls['detail'] == ['1', '2', '3']
+
+
+def test_remote_verification_keeps_challenge_page_and_blocks_next_run(replay, monkeypatch):
+    import src.scraper as scraper
+    from src.services.browser_session_service import BrowserSessionControl
+    run, calls = replay
+    monkeypatch.setattr(scraper, '_notify_task_failure', run.notify_failure)
+    notifier = AsyncMock()
+    monkeypatch.setattr(scraper, 'notify_browser_handoff', notifier)
+    assert run('shadow', remote=True, validation=True) == 0
+    assert calls['detail'] == ['0']
+    assert not calls['closed']
+    assert not calls['browser_closed']
+    assert len(calls['persistent_context'][0].pages) == 3
+    assert BrowserSessionControl().read()['state'] == 'verification_required'
+    notifier.assert_awaited_once()
+    assert run('shadow', remote=True, validation=True) == 0
+    assert len(calls['cdp']) == 1
+    assert not calls['ai']
+
+
+def test_seller_validation_is_watched_until_dispatcher_finishes(replay, monkeypatch):
+    import src.scraper as scraper
+    from src.services.browser_session_service import BrowserSessionControl
+    notifier = AsyncMock()
+    monkeypatch.setattr(scraper, 'notify_browser_handoff', notifier)
+    run, calls = replay
+    assert run('shadow', remote=True, seller_validation=True) == 0
+    assert BrowserSessionControl().read()['state'] == 'verification_required'
+    notifier.assert_awaited_once()
+    assert not calls['ai']
+    assert not calls['saved']
+    assert not calls['browser_closed']
