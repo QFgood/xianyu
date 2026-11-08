@@ -12,7 +12,6 @@ from src.api.routes import (
     tasks,
     logs,
     settings,
-    prompts,
     results,
     login_state,
     websocket,
@@ -111,7 +110,6 @@ app.include_router(tasks.router)
 app.include_router(dashboard.router)
 app.include_router(logs.router)
 app.include_router(settings.router)
-app.include_router(prompts.router)
 app.include_router(results.router)
 app.include_router(login_state.router)
 app.include_router(websocket.router)
