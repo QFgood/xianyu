@@ -49,7 +49,9 @@ class ItemAnalysisDispatcher:
         stop_requested: Callable[[], bool] | None = None,
         market_analyzer: AIAnalyzer | None = None,
         market_observer=None,
+        market_collector=None,
     ) -> None:
+        self._market_collector = market_collector
         self._market_analyzer = market_analyzer
         self._market_observer = market_observer
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -67,6 +69,14 @@ class ItemAnalysisDispatcher:
         task = asyncio.create_task(self._process_with_limit(job))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def collect(self, job):
+        if self._stop_requested():
+            return
+        if self._market_collector is None:
+            raise RuntimeError('No market collection packet configured')
+        await self._market_collector(copy.deepcopy(job.final_record))
+        self.completed_count += 1
 
     async def join(self) -> None:
         while self._tasks:

@@ -226,7 +226,7 @@ const emit = defineEmits<{
                 </div>
                 <div v-else class="flex flex-wrap items-center gap-2">
                   <div class="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-mono font-semibold text-emerald-700">
-                    {{ task.monitor_mode === 'buying' ? (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() : 'market_prompt.txt' }}
+                    {{ 'AI语义核对' }}
                   </div>
                   <Button
                     size="sm"
@@ -420,7 +420,7 @@ const emit = defineEmits<{
                     class="px-2 py-1 rounded bg-emerald-50/50 border border-emerald-100/50 text-[9px] font-mono font-black text-emerald-600 truncate max-w-[140px]"
                     :title="task.ai_prompt_criteria_file"
                   >
-                    {{ task.monitor_mode === 'buying' ? (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() : 'market_prompt.txt' }}
+                    {{ 'AI语义核对' }}
                   </div>
                   <Button 
                     size="sm" 

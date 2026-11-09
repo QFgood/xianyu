@@ -77,53 +77,9 @@ def test_generate_keyword_mode_task_without_ai_criteria(api_client):
     assert created["keyword_rules"] == ["a7m4", "验货宝"]
 
 
-def test_generate_ai_task_returns_job_and_completes_async(api_client, api_context, monkeypatch):
-    payload = {
-        "prefilter": {"mode": "off"},
-        "task_name": "Apple Watch S10",
-        "keyword": "apple watch s10",
-        "monitor_mode": "buying",
-        "description": "只看国行蜂窝版，电池健康高于 95%，拒绝维修机。",
-        "analyze_images": False,
-        "decision_mode": "ai",
-        "max_pages": 2,
-        "personal_only": True,
-    }
-
-    async def fake_generate_criteria(*_args, **_kwargs):
-        await asyncio.sleep(0.05)
-        return "[V6.3 核心升级]\\nApple Watch criteria"
-
-    monkeypatch.setattr(
-        "src.services.task_generation_runner.generate_criteria",
-        fake_generate_criteria,
-    )
-
-    response = api_client.post("/api/tasks/generate", json=payload)
-
-    assert response.status_code == 202
-    job = response.json()["job"]
-    assert isinstance(job["job_id"], str)
-    assert job["status"] in {"queued", "running"}
-    assert job["task"] is None
-
-    status_response = api_client.get(f"/api/tasks/generate-jobs/{job['job_id']}")
-    assert status_response.status_code == 200
-
-    for _ in range(50):
-        status_response = api_client.get(f"/api/tasks/generate-jobs/{job['job_id']}")
-        latest_job = status_response.json()["job"]
-        if latest_job["status"] == "completed":
-            break
-        time.sleep(0.02)
-    else:
-        raise AssertionError("任务生成作业未在预期时间内完成")
-
-    assert latest_job["task"]["prefilter"]["mode"] == "off"
-    assert latest_job["task"]["task_name"] == payload["task_name"]
-    assert latest_job["task"]["ai_prompt_criteria_file"].endswith("_criteria.txt")
-    assert latest_job["task"]["analyze_images"] is False
-    assert api_context["scheduler_service"].reload_calls == 1
+def test_buying_prompt_generation_is_retired(api_client):
+    response = api_client.post('/api/tasks/generate',json=dict(task_name='old',keyword='old',description='old',monitor_mode='buying'))
+    assert response.status_code == 400
 
 
 def test_create_task_accepts_cron_alias(api_client, sample_task_payload):
@@ -204,7 +160,7 @@ def test_prefilter_patch_contract_and_validation(api_client, sample_task_payload
     from unittest.mock import AsyncMock
     policy = dict(version=1, mode='shadow', kind='anchored_title_tokens', product_aliases=['Product'], reject_tokens=['V1'], keep_tokens=['V2'])
     generate = AsyncMock(side_effect=AssertionError('prefilter must not regenerate criteria'))
-    monkeypatch.setattr('src.api.routes.tasks.generate_criteria', generate)
+    monkeypatch.setattr('src.infrastructure.external.ai_client.AIClient.analyze_or_raise', generate)
     response = api_client.post('/api/tasks/', json=sample_task_payload | {'prefilter': policy})
     assert response.status_code == 200
     assert response.json()['task']['prefilter']['mode'] == 'shadow'
@@ -223,8 +179,7 @@ def test_prefilter_patch_contract_and_validation(api_client, sample_task_payload
 def test_market_creation_and_edit_do_not_generate_buying_prompt(api_client, monkeypatch):
     from unittest.mock import AsyncMock
     forbidden = AsyncMock(side_effect=AssertionError('market must not generate buyer persona'))
-    monkeypatch.setattr('src.api.routes.tasks.generate_criteria', forbidden)
-    monkeypatch.setattr('src.services.task_generation_runner.generate_criteria', forbidden)
+    monkeypatch.setattr('src.infrastructure.external.ai_client.AIClient.analyze_or_raise', forbidden)
     response = api_client.post('/api/tasks/generate', json={
         'task_name':'Mac mini M6 16GB 256GB', 'keyword':'Mac mini M6', 'description':'16GB+256GB内置SSD',
         'product_selection':{'catalog_id':'apple-mac-mini-m6','memory_gb':16,'storage_gb':256}} )

@@ -21,13 +21,13 @@ from src.api.routes import (
 from src.api.dependencies import (
     set_process_service,
     set_scheduler_service,
-    set_task_generation_service,
+    set_background_task_service,
 )
 from src.services.task_service import TaskService
 from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
 from src.services.task_log_cleanup_service import cleanup_task_logs
-from src.services.task_generation_service import TaskGenerationService
+from src.services.background_task_service import BackgroundTaskService
 from src.infrastructure.persistence.sqlite_bootstrap import bootstrap_sqlite_storage
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.infrastructure.config.settings import settings as app_settings
@@ -36,7 +36,7 @@ from src.infrastructure.config.settings import settings as app_settings
 # 全局服务实例
 process_service = ProcessService()
 scheduler_service = SchedulerService(process_service)
-task_generation_service = TaskGenerationService()
+background_task_service = BackgroundTaskService()
 
 
 async def _sync_task_runtime_status(task_id: int, is_running: bool) -> None:
@@ -59,7 +59,7 @@ process_service.set_lifecycle_hooks(
 # 设置全局 ProcessService 实例供依赖注入使用
 set_process_service(process_service)
 set_scheduler_service(scheduler_service)
-set_task_generation_service(task_generation_service)
+set_background_task_service(background_task_service)
 
 
 @asynccontextmanager

@@ -6,9 +6,9 @@ A Playwright and AI-powered multi-task real-time monitoring tool for Xianyu (闲
 
 ## Core Features
 
-- **Web Visual Management**: Task management, account management, AI criteria editing, run logs, results browsing
+- **Web Visual Management**: Task management, account management, catalog target selection, run logs, results browsing
 - **AI-Driven**: Natural language task creation, multimodal model for in-depth product analysis
-- **Multi-Task Concurrency**: Independent configuration for keywords, prices, filters, and AI prompts
+- **Multi-Task Concurrency**: Independent configuration for keywords, prices, filters, and structured targets
 - **SQLite as Primary Storage**: Tasks, results, and price history are persisted in one embedded database instead of repeatedly scanning `jsonl`
 - **Advanced Filtering**: Free shipping, new listing time range, province/city/district filtering
 - **Instant Notifications**: Supports ntfy.sh, WeChat Work (企业微信), Bark, Telegram, Webhook
@@ -66,8 +66,8 @@ chmod +x start.sh
 
 ### Create Your First Task
 
-- `AI mode`: fill in the requirement description. Submission opens a separate progress dialog while the criteria are generated asynchronously.
-- `Keyword mode`: provide keyword rules and the task is created immediately.
+- Select an exact catalog model, RAM and internal SSD. Task creation saves immediately; collection and semantic classification run in separate stages.
+- Reanalyze saved details from the market page without crawling again.
 - `Region filter`: now uses a province / city / district selector backed by an embedded Xianyu page snapshot instead of manual text input.
 
 ## 🐳 Docker Deployment (Recommended)
@@ -89,7 +89,6 @@ docker compose down
 - These paths are persisted by default:
   - `data/` for the SQLite primary store (tasks, results, price history)
   - `state/` for login-state cookie files
-  - `prompts/` for task prompt files
   - `logs/` for runtime logs
   - `images/` for downloaded product images and per-task temporary image folders
   - `config.json`, `jsonl/`, and `price_history/` as legacy sources for the first SQLite migration
@@ -99,7 +98,7 @@ docker compose down
 - SQLite is now the online primary storage, with the default path `data/app.sqlite3`
 - You can override the database path with `APP_DATABASE_FILE`; Docker sets it to `/app/data/app.sqlite3`
 - On startup, the app initializes the schema and tries to import existing data once from legacy `config.json`, `jsonl/`, and `price_history/`
-- `state/`, `prompts/`, `logs/`, and `images/` remain filesystem-based and are not stored in SQLite
+- `state/`, `logs/`, and `images/` remain filesystem-based and are not stored in SQLite
 - Product images are temporarily downloaded to `images/task_images_<task_name>/` and are normally cleaned up when the task finishes
 - After the first upgrade and after verifying the database contents in `data/app.sqlite3`, you can decide whether to keep the legacy `config.json`, `jsonl/`, and `price_history/` mounts
 
@@ -126,7 +125,7 @@ docker compose down
 
 ### System Settings
 
-- View system status, edit prompts, and adjust proxy / rotation-related settings.
+- View system status and adjust proxy / rotation-related settings.
 
 </details>
 
@@ -169,7 +168,6 @@ cd web-ui && npm run build
 - `POST /api/tasks/generate`
   - `decision_mode=ai`: returns `202` with a `job`; the client should poll for progress.
   - `decision_mode=keyword`: returns the created task directly.
-- `GET /api/tasks/generate-jobs/{job_id}`: fetch AI task-generation progress.
 - `POST /auth/status`: validate Web UI credentials.
 
 </details>
@@ -252,9 +250,9 @@ graph TD
 <details>
 <summary>Click to expand FAQ</summary>
 
-### Why does AI task creation take time?
+### How does classification work?
 
-In AI mode, the system generates analysis criteria before the task itself is created. This now runs as a background job with a separate progress dialog instead of blocking the task form.
+Tasks are saved immediately from a catalog selection. Collection saves durable detail packets; a separate semantic classification stage receives the target snapshot. Reanalysis uses saved details without opening marketplace pages. User prompt editing and buying-criteria generation are retired.
 
 ### Why is the region filter optional by default?
 

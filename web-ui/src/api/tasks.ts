@@ -2,7 +2,6 @@ import type {
   Task,
   TaskCreateResponse,
   TaskGenerateRequest,
-  TaskGenerationJob,
   TaskUpdate,
 } from '@/types/task.d.ts'
 import { http } from '@/lib/http'
@@ -19,11 +18,6 @@ export async function createTaskWithAI(data: TaskGenerateRequest): Promise<TaskC
     },
     body: JSON.stringify(data),
   })
-}
-
-export async function getTaskGenerationJob(jobId: string): Promise<TaskGenerationJob> {
-  const result = await http(`/api/tasks/generate-jobs/${jobId}`)
-  return result.job
 }
 
 export async function updateTask(taskId: number, data: TaskUpdate): Promise<Task> {

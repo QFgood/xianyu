@@ -521,15 +521,15 @@ async def scrape_user_profile(context, user_id: str) -> dict:
 
 async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     from src.services.market_report_service import MarketRun
-    from src.services.market_analysis_service import MarketAnalyzer
+    from src.services.market_classification_service import MarketCollection, classify_market_batch
     task_config = dict(task_config)
     from src.services.product_catalog_service import catalog_search_fields
     task_config.update(catalog_search_fields(task_config))
     market = MarketRun(task_config) if task_config.get('monitor_mode', 'market') == 'market' else None
-    analyzer = MarketAnalyzer() if market else None
+    collection = MarketCollection(market) if market else None
     if market:
         task_config['_market_run'] = market
-        task_config['_market_analyzer'] = analyzer
+        task_config['_market_collection'] = collection
         task_config['ai_prompt_text'] = market.prompt
         if debug_limit:
             market.fail('调试截断，仅展示部分观察')
@@ -563,12 +563,14 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     finally:
         prefilter.summary(status)
         if market:
-            try:
+            await collection.seal(status)
+            if status == 'completed':
+                # Browser context and shared lease have both ended before semantic analysis.
+                await classify_market_batch(market.run_id,image_downloader=download_all_images,
+                                            saver=save_to_jsonl,skip_ai=SKIP_AI_ANALYSIS)
+            else:
                 await market.finish(status)
-            except Exception as exc:
-                log_time(f'行情报告保存/通知失败: {type(exc).__name__}')
-            finally:
-                await analyzer.close()
+
 
 
 async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: PrefilterRun):
@@ -742,8 +744,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                 ),
                 image_downloader=download_all_images,
                 ai_analyzer=get_ai_analysis,
-                market_analyzer=task_config['_market_analyzer'].analyze if market else None,
-                market_observer=market.observe if market else None,
+                market_collector=collection.collect if (collection := task_config.get('_market_collection')) else None,
                 notifier=send_ntfy_notification,
                 saver=save_to_jsonl,
                 stop_requested=(lambda: validation_watch.triggered) if remote else None,
@@ -1275,8 +1276,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                         "本商品价格位置", {}
                                     )
 
-                                analysis_dispatcher.submit(
-                                    ItemAnalysisJob(
+                                job = ItemAnalysisJob(
                                         keyword=keyword,
                                         task_name=task_config.get(
                                             "task_name", "Untitled Task"
@@ -1291,12 +1291,15 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
                                         zhima_credit_text=zhima_credit_text,
                                         registration_duration_text=registration_duration_text,
                                     )
-                                )
+                                if market:
+                                    await analysis_dispatcher.collect(job)
+                                else:
+                                    analysis_dispatcher.submit(job)
 
                                 processed_links.add(unique_key)
                                 processed_item_count += 1
                                 log_time(
-                                    f"商品已提交后台分析。累计处理 {processed_item_count} 个新商品。"
+                                    f"{'候选详情已保存' if market else '商品已提交后台分析'}。累计处理 {processed_item_count} 个商品。"
                                 )
 
                                 # --- 修改: 增加单个商品处理后的主要延迟 ---
@@ -1384,7 +1387,7 @@ async def _scrape_xianyu(task_config: dict, debug_limit: int, prefilter: Prefilt
             finally:
                 try:
                     if analysis_dispatcher is not None:
-                        log_time("等待后台分析任务完成...")
+                        log_time("采集结束，候选详情已保存；释放浏览器后开始AI分析。" if market else "等待后台分析任务完成...")
                         if remote and (await asyncio.to_thread(control.read))['state'] != 'ready':
                             await analysis_dispatcher.cancel_pending()
                         else:

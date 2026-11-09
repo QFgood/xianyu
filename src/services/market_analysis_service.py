@@ -1,6 +1,6 @@
 """详情页行情分类；与旧的购买画像/推荐 schema 分离。"""
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from typing import Literal
 from src.infrastructure.external.ai_client import AIClient
 
@@ -22,26 +22,21 @@ class MarketClassification(BaseModel):
     identity_evidence: str = Field(default='', max_length=1000)
     evidence_source: Literal['text', 'image', 'unknown'] = 'unknown'
 
-
-def ensure_market_prompt() -> Path:
-    path = Path('prompts/market_prompt.txt')
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Exclusive creation preserves an administrator's concurrent edit.
-        try:
-            with path.open('x', encoding='utf-8') as file:
-                file.write(Path('static/market_prompt.txt').read_text(encoding='utf-8'))
-        except FileExistsError:
-            pass
-    return path
+    @field_validator('memory_gb','storage_gb','cpu_cores','gpu_cores',mode='before')
+    @classmethod
+    def exact_numeric_string(cls,value):
+        # Accept JSON numeric strings, never infer units, capacities or a chip.
+        return int(value) if isinstance(value,str) and value.isdecimal() else value
 
 
-def build_market_prompt(task: dict) -> str:
-    template = ensure_market_prompt().read_text(encoding='utf-8')
+def build_market_prompt(task: dict, *, target=None) -> str:
+    template = Path('static/market_prompt.txt').read_text(encoding='utf-8')
+    # This internal contract ships with the classifier. Old mounted prompts must
+    # not silently supply a previous enum/schema after an app upgrade.
     from dataclasses import asdict
     from src.domain.models.market_target import MarketTarget
     import json
-    template += '\n必须逐项核对的结构化目标：' + json.dumps(asdict(MarketTarget.from_task(task)), ensure_ascii=False)
+    template += '\n必须逐项核对的结构化目标：' + json.dumps(asdict(target or MarketTarget.from_task(task)), ensure_ascii=False)
     from src.domain.models.product_selection import ProductSelection
     selected_label = ProductSelection.model_validate(task['product_selection']).label() if task.get('product_selection') else str(task.get('task_name') or task['keyword'])
     return template.replace('{{TARGET}}', selected_label).replace(
@@ -56,7 +51,7 @@ class MarketAnalyzer:
         if self.client is None:
             self.client = AIClient()
         # The generic client must not append the legacy buying instructions.
-        result = await self.client.analyze({'商品信息': record.get('商品信息', {}),
+        result = await self.client.analyze_or_raise({'商品信息': record.get('商品信息', {}),
                                             '卖家信息': record.get('卖家信息', {}),
                                             'analysis_purpose': 'market'}, images, prompt)
         if result is None:

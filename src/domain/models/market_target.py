@@ -115,10 +115,10 @@ class MarketTarget:
                 result.update(match_status='unknown', reason='出售品身份依据未明确目标芯片')
                 return result
             occurrences = [m.start() for m in re.finditer(re.escape(quote), text)]
-            if occurrences and all(re.search(r'因.*换|换购|升级|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', re.split(r'[，。；,;]', text[max(0, pos-40):pos])[-1]) for pos in occurrences):
+            if occurrences and all(re.search(r'因.*换|换购|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', re.split(r'[，。；,;]', text[max(0, pos-40):pos])[-1]) for pos in occurrences):
                 result.update(match_status='unknown', reason='目标芯片仅出现在换机或比较语境中')
                 return result
-            if re.search(r'因.*换|换购|升级|准备.*换|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', quote):
+            if re.search(r'因.*换|换购|准备.*换|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', quote):
                 result.update(match_status='unknown', reason='目标型号出现在换机/比较等描述中，不能证明出售品型号')
                 return result
         # A single explicit conflicting chip in the actual listing cannot be overruled by AI.

@@ -47,7 +47,7 @@ COPY --from=frontend-builder /dist /app/dist
 COPY src /app/src
 COPY spider_v2.py /app/spider_v2.py
 COPY tools/check_browser_connection.py /app/tools/check_browser_connection.py
-COPY prompts /app/prompts
+COPY tools/classify_market_batch.py /app/tools/classify_market_batch.py
 COPY static /app/static
 COPY config.json.example /app/config.json.example
 

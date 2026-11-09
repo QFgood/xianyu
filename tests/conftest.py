@@ -18,7 +18,7 @@ from src.api import dependencies as deps
 from src.api.routes import tasks
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.services.task_service import TaskService
-from src.services.task_generation_service import TaskGenerationService
+from src.services.background_task_service import BackgroundTaskService
 
 
 @pytest.fixture()
@@ -112,7 +112,7 @@ def api_context(tmp_path):
     task_service = TaskService(repository)
     process_service = FakeProcessService()
     scheduler_service = FakeSchedulerService()
-    task_generation_service = TaskGenerationService()
+    background_task_service = BackgroundTaskService()
 
     app = FastAPI()
     app.include_router(tasks.router)
@@ -129,8 +129,8 @@ def api_context(tmp_path):
     def override_get_scheduler_service():
         return scheduler_service
 
-    def override_get_task_generation_service():
-        return task_generation_service
+    def override_get_background_task_service():
+        return background_task_service
 
     async def mark_started(task_id: int):
         await task_service.update_task_status(task_id, True)
@@ -145,7 +145,7 @@ def api_context(tmp_path):
     app.dependency_overrides[deps.get_task_service] = override_get_task_service
     app.dependency_overrides[deps.get_process_service] = override_get_process_service
     app.dependency_overrides[deps.get_scheduler_service] = override_get_scheduler_service
-    app.dependency_overrides[deps.get_task_generation_service] = override_get_task_generation_service
+    app.dependency_overrides[deps.get_background_task_service] = override_get_background_task_service
 
     return {
         "app": app,
@@ -153,7 +153,7 @@ def api_context(tmp_path):
         "db_path": db_path,
         "process_service": process_service,
         "scheduler_service": scheduler_service,
-        "task_generation_service": task_generation_service,
+        "background_task_service": background_task_service,
     }
 
 
