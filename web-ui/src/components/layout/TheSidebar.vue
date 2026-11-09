@@ -5,7 +5,6 @@ import {
   LayoutDashboard, 
   ListTodo, 
   Users, 
-  Layers, 
   Terminal, 
   Settings2,
   ChevronRight
@@ -23,7 +22,6 @@ const navItems = computed(() => [
   { to: '/dashboard', label: t('sidebar.dashboard'), icon: LayoutDashboard },
   { to: '/tasks', label: t('sidebar.tasks'), icon: ListTodo },
   { to: '/accounts', label: t('sidebar.accounts'), icon: Users },
-  { to: '/results', label: t('sidebar.results'), icon: Layers },
   { to: '/logs', label: t('sidebar.logs'), icon: Terminal },
   { to: '/settings', label: t('sidebar.settings'), icon: Settings2 },
 ])

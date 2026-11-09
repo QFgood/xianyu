@@ -90,7 +90,7 @@ class MarketTarget:
         actual = dict(product_family=normalize(result.get('product_family')),
                       chip=chip_name(result.get('chip')), memory_gb=result.get('memory_gb'),
                       storage_gb=result.get('storage_gb'), cpu_cores=result.get('cpu_cores'), gpu_cores=result.get('gpu_cores'))
-        for key in ('product_family', 'chip', 'memory_gb', 'storage_gb', 'cpu_cores', 'gpu_cores'):
+        for key in ('product_family', 'chip', 'memory_gb', 'storage_gb'):
             target = getattr(self, key)
             if target is None:
                 continue
@@ -102,27 +102,37 @@ class MarketTarget:
             if observed != target:
                 result.update(match_status='no_match', reason=f'出售商品的{label}为{observed}，目标为{target}')
                 return result
-        text = normalize(str(item.get('商品标题') or '') + ' ' + str(item.get('商品描述') or ''))
-        quote = normalize(result.get('identity_evidence'))
-        if not quote or result.get('evidence_source') not in {'text', 'image'}:
-            result.update(match_status='unknown', reason='出售品身份依据不明，不计入目标行情')
+        from src.domain.models.market_evidence import verified_excerpts, unique_catalog_cores
+        verified, referenced = verified_excerpts(result,item,self.chip)
+        if not verified:
+            code = 'replacement_reference' if referenced else 'unverified_excerpt'
+            reason = ('目标芯片仅出现在换机或比较语境中，不能确认出售品型号' if referenced else
+                      'AI未提供可在详情中核实的身份片段，请重新分析；不代表卖家没有写配置')
+            result.update(match_status='unknown',reason=reason,uncertainty_code=code)
             return result
-        if result.get('evidence_source') == 'text':
-            if not quote or quote not in text:
-                result.update(match_status='unknown', reason='出售商品身份引文未能在详情中核实')
+        result['verified_evidence'] = verified
+        # Fill only a uniquely published specification for the observed chip.
+        # Never copy the desired CPU/GPU numbers into an unconfirmed listing.
+        pair = unique_catalog_cores(actual['product_family'],actual['chip'])
+        derived=[]
+        for index,key in enumerate(('cpu_cores','gpu_cores')):
+            if actual[key] is None and pair:
+                actual[key]=pair[index]
+                result[key]=pair[index]
+                derived.append(key)
+            expected=getattr(self,key)
+            if expected is None: continue
+            if actual[key] is None:
+                result.update(match_status='unknown',reason='该芯片有多个核心版本，详情未确认具体版本',uncertainty_code='core_variant_unknown')
                 return result
-            if self.chip and self.chip not in chips_in(quote):
-                result.update(match_status='unknown', reason='出售品身份依据未明确目标芯片')
+            if actual[key]!=expected:
+                result.update(match_status='no_match',reason=f'出售商品的{key}为{actual[key]}，目标为{expected}')
                 return result
-            occurrences = [m.start() for m in re.finditer(re.escape(quote), text)]
-            if occurrences and all(re.search(r'因.*换|换购|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', re.split(r'[，。；,;]', text[max(0, pos-40):pos])[-1]) for pos in occurrences):
-                result.update(match_status='unknown', reason='目标芯片仅出现在换机或比较语境中')
-                return result
-            if re.search(r'因.*换|换购|准备.*换|换成|换了|换新|换机|相比|对比|兼容|适用|不是|不含', quote):
-                result.update(match_status='unknown', reason='目标型号出现在换机/比较等描述中，不能证明出售品型号')
-                return result
-        # A single explicit conflicting chip in the actual listing cannot be overruled by AI.
-        text_chips = chips_in(text)
-        if self.chip and len(text_chips) == 1 and self.chip not in text_chips:
-            result.update(match_status='no_match', reason='商品文字明确为其他芯片代际，不计入目标行情')
+        if derived:
+            result['catalog_derived_fields']=derived
+            result['catalog_evidence_note']='CPU/GPU核心数依据已核实芯片的商品库唯一规格补全；不是从目标值推测'
+        text = normalize(str(item.get('商品标题') or '')+' '+str(item.get('商品描述') or ''))
+        text_chips=chips_in(text)
+        if self.chip and len(text_chips)==1 and self.chip not in text_chips:
+            result.update(match_status='no_match',reason='商品文字明确为其他芯片代际，不计入目标行情')
         return result

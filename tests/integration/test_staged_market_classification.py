@@ -152,3 +152,20 @@ def test_legacy_report_reanalysis_restores_saved_details_without_claiming_new_sc
         assert len(MarketBatchRepository().candidates(restored))==1
         assert json.loads(packet['target_json'])['chip']=='m6'
     asyncio.run(scenario())
+
+
+def test_unverifiable_ai_narrative_gets_one_evidence_repair(db):
+    async def scenario():
+        run=MarketRun(task());collection=MarketCollection(run)
+        await collection.collect(detail());await collection.seal('completed')
+        first=result() | {'identity_evidence':'型号与配置全部符合，建议计入样本'}
+        second=result() | {'identity_evidence':'出售品为M6',
+                           'evidence_quotes':[{'source':'title','text':'Mac mini M6 16+256'}]}
+        model=SimpleNamespace(analyze=AsyncMock(side_effect=[first,second]))
+        report=await classify_market_batch(run.run_id,analyzer=model,saver=AsyncMock(return_value=True),notifier=AsyncMock(return_value={}))
+        assert model.analyze.await_count==2
+        assert report['sample_count']==1
+        assert 'evidence_quotes' in model.analyze.call_args.args[2]
+        row=MarketBatchRepository().candidates(run.run_id)[0]
+        assert row['attempts']==2 and row['error_code'] is None
+    asyncio.run(scenario())

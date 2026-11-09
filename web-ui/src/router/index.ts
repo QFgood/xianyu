@@ -35,8 +35,7 @@ const routes = [
       {
         path: 'results',
         name: 'Results',
-        component: () => import('@/views/MarketView.vue'),
-        meta: { titleKey: 'routes.results' },
+        redirect: '/dashboard',
       },
       {
         path: 'results/legacy',

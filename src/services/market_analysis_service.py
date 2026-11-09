@@ -5,6 +5,11 @@ from typing import Literal
 from src.infrastructure.external.ai_client import AIClient
 
 
+class EvidenceQuote(BaseModel):
+    source: Literal['title','description','image']
+    text: str = Field(min_length=1,max_length=1000)
+
+
 class MarketClassification(BaseModel):
     model_config = ConfigDict(extra='ignore')
     match_status: Literal['match', 'no_match', 'unknown']
@@ -21,6 +26,7 @@ class MarketClassification(BaseModel):
     gpu_cores: StrictInt | None = None
     identity_evidence: str = Field(default='', max_length=1000)
     evidence_source: Literal['text', 'image', 'unknown'] = 'unknown'
+    evidence_quotes: list[EvidenceQuote] = Field(default_factory=list,max_length=10)
 
     @field_validator('memory_gb','storage_gb','cpu_cores','gpu_cores',mode='before')
     @classmethod
@@ -57,7 +63,9 @@ class MarketAnalyzer:
         if result is None:
             raise ValueError('行情分类不可用，样本不计入统计')
         validated = MarketClassification.model_validate(result).model_dump()
-        if validated['evidence_source'] == 'image' and not images:
+        if not images:
+            validated['evidence_quotes'] = [q for q in validated['evidence_quotes'] if q['source'] != 'image']
+        if validated['evidence_source'] == 'image' and not images and not validated['evidence_quotes']:
             validated.update(match_status='unknown', reason='未提供图片，不能采用图片身份依据')
         return validated
 

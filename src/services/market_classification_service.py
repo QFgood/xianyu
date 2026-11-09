@@ -135,9 +135,13 @@ async def classify_market_batch(batch_id, *, image_downloader=None, saver=None, 
                                     prompt = market.prompt
                                     if attempt:
                                         from src.services.market_analysis_service import MarketClassification
-                                        prompt += '\n上一次调用未成功。严格按以下JSON契约返回，未知的数值或型号使用null，枚举值未知使用unknown，不要猜测：' + json.dumps(MarketClassification.model_json_schema(),ensure_ascii=False)
+                                        prompt += '\n若前次没有可核实的引文，请在evidence_quotes中复制标题/描述里的短原文，不要把分析说明作为引文。严格按以下JSON契约返回，未知的数值或型号使用null，枚举值未知使用unknown，不要猜测：' + json.dumps(MarketClassification.model_json_schema(),ensure_ascii=False)
                                     result = await client.analyze(record,paths,prompt)
+                                    result = market.target.validate_identity(result,record['商品信息'])
                                     code = None
+                                    if result.get('uncertainty_code') == 'unverified_excerpt' and attempt == 0:
+                                        await asyncio.sleep(1)
+                                        continue
                                     break
                                 except Exception as exc:
                                     code = error_code(exc)
