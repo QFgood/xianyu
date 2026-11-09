@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type Summary = { count: number; min: number | null; max: number | null; median: number | null; p25: number | null; p75: number | null }
-type Sample = { item_id: string; title: string; price: number | null; link: string; seller: Record<string, unknown>; classification: { model: string; condition: string; reason: string; error?: string; match_status?: string; identity_evidence?: string } }
+type Sample = { item_id: string; title: string; price: number | null; link: string; seller: Record<string, unknown>; classification: { model: string; condition: string; reason: string; error?: string; match_status?: string; identity_evidence?: string; verified_evidence?: {source: string; text: string}[]; catalog_evidence_note?: string } }
 type Report = { run_id: string; task_key: string; cohort: string; task_name: string; created_at: string; status: string; target: string; sample_count: number; title_rejected?: number; summary: Summary; groups: Record<string, Summary>; samples: Sample[]; excluded: Sample[]; errors: string[]; scope: Record<string, unknown> }
 type Batch = { created_at: string; id: string; task_key: string; task_name: string; state: string; collection_status: string; collected: number; classified: number; failed: number; target: Record<string, unknown> }
 const batches = ref<Batch[]>([])
@@ -124,7 +124,7 @@ onUnmounted(() => clearInterval(timer))
         <div v-for="sample in items.slice(0, displayLimits[category] || 20)" :key="sample.item_id" class="border-t mt-3 pt-3 text-sm space-y-1">
           <a :href="safeLink(sample.link)" target="_blank" rel="noopener noreferrer" class="text-blue-600 line-clamp-2 break-words">{{ sample.title }}</a>
           <p class="text-slate-500 line-clamp-2 break-words">{{ sample.classification.reason }}</p>
-          <details class="text-xs text-slate-500"><summary class="cursor-pointer">查看分析依据</summary><p class="whitespace-pre-wrap break-words mt-2">{{ sample.classification.identity_evidence || sample.classification.reason }}</p><p v-if="sample.classification.error">错误类别：{{ sample.classification.error }}</p></details>
+          <details class="text-xs text-slate-500"><summary class="cursor-pointer">查看分析依据</summary><p class="whitespace-pre-wrap break-words mt-2">{{ sample.classification.identity_evidence || sample.classification.reason }}</p><p v-for="(quote, index) in sample.classification.verified_evidence || []" :key="index" class="mt-2 whitespace-pre-wrap break-words">核实引文（{{ quote.source === 'title' ? '标题' : quote.source === 'description' ? '描述' : '图片' }}）：{{ quote.text }}</p><p v-if="sample.classification.catalog_evidence_note" class="mt-2">{{ sample.classification.catalog_evidence_note }}</p><p v-if="sample.classification.error">错误类别：{{ sample.classification.error }}</p></details>
         </div>
         <button v-if="items.length > (displayLimits[category] || 20)" class="text-blue-600 mt-4 text-sm" @click="displayLimits[category] = (displayLimits[category] || 20) + 20">再显示20条</button>
       </details>
