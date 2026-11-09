@@ -16,6 +16,16 @@ from src.infrastructure.persistence.storage_names import DEFAULT_DATABASE_PATH
 BUSY_TIMEOUT_MS = 5000
 
 SCHEMA_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS market_batches (
+        id TEXT PRIMARY KEY, task_key TEXT NOT NULL, task_name TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, state TEXT NOT NULL,
+        task_json TEXT NOT NULL, prompt TEXT NOT NULL, target_json TEXT NOT NULL,
+        collection_status TEXT, collection_errors TEXT NOT NULL DEFAULT '[]',
+        title_rejected INTEGER NOT NULL DEFAULT 0)""",
+    """CREATE TABLE IF NOT EXISTS market_candidates (
+        batch_id TEXT NOT NULL REFERENCES market_batches(id), item_id TEXT NOT NULL,
+        record_json TEXT NOT NULL, analysis_json TEXT, error_code TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(batch_id,item_id))""",
     """CREATE TABLE IF NOT EXISTS market_reports (
         run_id TEXT PRIMARY KEY, task_key TEXT NOT NULL, cohort TEXT NOT NULL,
         created_at TEXT NOT NULL, payload TEXT NOT NULL)""",

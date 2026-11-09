@@ -170,12 +170,18 @@ class AIClient:
             return None
 
         try:
-            messages = self._build_messages(product_data, image_paths, prompt_text)
-            response = await self._call_ai(messages)
-            return self._parse_response(response)
+            return await self.analyze_or_raise(product_data, image_paths, prompt_text)
         except Exception as e:
             print(f"AI 分析失败: {e}")
             return None
+
+    async def analyze_or_raise(self, product_data, image_paths, prompt_text):
+        """Classification callers retain typed failures without exposing provider payloads."""
+        if not self.is_available():
+            raise AIUnavailableError('AI is not configured')
+        messages = self._build_messages(product_data, image_paths, prompt_text)
+        response = await self._call_ai(messages)
+        return self._parse_response(response)
 
     def _build_messages(self, product_data: Dict, image_paths: List[str], prompt_text: str) -> List[Dict]:
         """构建 AI 消息"""
@@ -279,3 +285,7 @@ class AIClient:
         except json.JSONDecodeError:
             print(f"无法解析 AI 响应: {response_text[:100]}")
             return None
+
+
+class AIUnavailableError(RuntimeError):
+    pass

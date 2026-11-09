@@ -7,7 +7,7 @@ class MarketReportRepository:
     def save(self, report):
         with sqlite_connection() as conn:
             init_schema(conn)
-            conn.execute('INSERT INTO market_reports(run_id, task_key, cohort, created_at, payload) VALUES(?,?,?,?,?)',
+            conn.execute('INSERT INTO market_reports(run_id, task_key, cohort, created_at, payload) VALUES(?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET payload=excluded.payload',
                          (report['run_id'], report['task_key'], report['cohort'], report['created_at'], json.dumps(report, ensure_ascii=False)))
             conn.commit()
 

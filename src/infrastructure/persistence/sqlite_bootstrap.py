@@ -99,7 +99,7 @@ def _import_tasks_if_needed(conn, legacy_config_file: str | None) -> None:
                 raw_task.get("min_price"),
                 raw_task.get("max_price"),
                 raw_task.get("cron"),
-                raw_task.get("ai_prompt_base_file", "prompts/base_prompt.txt"),
+                raw_task.get("ai_prompt_base_file", ""),
                 raw_task.get("ai_prompt_criteria_file", ""),
                 raw_task.get("account_state_file"),
                 raw_task.get("account_strategy", "auto"),

@@ -43,7 +43,6 @@ class LiveTestSettings:
     expect_min_items: int
     debug_limit: int
     timeout_seconds: int
-    enable_task_generation: bool
     account_source_path: Path
     ai_test_payload: dict[str, str]
 
@@ -121,7 +120,6 @@ def load_live_settings(repo_root: Path) -> LiveTestSettings:
         expect_min_items=env_int("LIVE_EXPECT_MIN_ITEMS", DEFAULT_EXPECT_MIN_ITEMS),
         debug_limit=env_int("LIVE_TEST_DEBUG_LIMIT", DEFAULT_LIVE_DEBUG_LIMIT),
         timeout_seconds=env_int("LIVE_TIMEOUT_SECONDS", DEFAULT_LIVE_TIMEOUT_SECONDS),
-        enable_task_generation=env_flag("LIVE_ENABLE_TASK_GENERATION"),
         account_source_path=resolve_account_source(repo_root),
         ai_test_payload=build_ai_test_payload(runtime_env),
     )

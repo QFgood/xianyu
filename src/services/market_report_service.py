@@ -25,16 +25,16 @@ def summarize(samples):
 
 
 class MarketRun:
-    def __init__(self, task, repository=None):
+    def __init__(self, task, repository=None, *, target=None):
         self.repository = repository or MarketReportRepository()
         self.task = task
         from src.domain.models.market_target import MarketTarget
-        self.target = MarketTarget.from_task(task)
+        self.target = target or MarketTarget.from_task(task)
         self.title_rejected = 0
         self.observations = {}
         self.errors = []
         self.run_id = uuid4().hex
-        self.prompt = build_market_prompt(task)
+        self.prompt = build_market_prompt(task, target=self.target)
         # Keep changed search scopes / target / prompt revisions out of comparisons.
         scope_keys = ('keyword', 'task_name', 'description', 'max_pages', 'min_price', 'max_price',
                       'personal_only', 'free_shipping', 'new_publish_option', 'region',
@@ -75,9 +75,9 @@ class MarketRun:
                                      seller=record.get('卖家信息', {}),
                                      classification=classification, valid=valid)
         if classification.get('error'):
-            self.fail('部分商品分类失败')
+            self.fail('部分商品AI分类调用失败，可仅重试分类')
 
-    async def finish(self, status, notifier=None):
+    async def finish(self, status, notifier=None, *, allow_notification=True):
         samples = sorted((s for s in self.observations.values() if s['valid']), key=lambda s: s['item_id'])
         complete = status == 'completed' and not self.errors
         report = dict(run_id=self.run_id, task_key=self.task_key, cohort=self.cohort,
@@ -92,6 +92,8 @@ class MarketRun:
                       excluded=[s for s in self.observations.values() if not s['valid']],
                       groups={condition: summarize([s for s in samples if s['classification']['condition'] == condition])
                               for condition in ('new','like_new','light_wear')})
+        report['categories'] = {category: [sample for sample in report['excluded'] if observation_category(sample) == category]
+                                for category in ('not_target','insufficient','condition_or_price','failed')}
         # Compare with last successfully delivered sample set; failed sends can retry.
         baseline = await asyncio.to_thread(self.repository.delivered, self.cohort)
         current = {s['item_id']: {'price': s['price'], 'condition': s['classification']['condition']} for s in samples}
@@ -102,7 +104,7 @@ class MarketRun:
         changed = current != before
         report['changed'] = complete and changed
         await asyncio.to_thread(self.repository.save, report)
-        if complete and changed:
+        if complete and changed and allow_notification:
             send = notifier or build_notification_service().send_notification
             result = await send({'商品标题': report['task_name'], '通知标题': '行情更新 | ' + report['task_name'],
                                  '当前售价': '本轮在售标价', '商品链接': '#', 'market_report': report}, format_report(report))
@@ -130,3 +132,11 @@ def format_report(report):
     lines.append(f"不匹配/信息不明/成色或功能不符：{len(report['excluded'])} 件；标题明确非目标：{report.get('title_rejected', 0)} 件")
     lines.append('仅为卖家在售标价，不是成交价；本轮未见不代表已售。')
     return '\n'.join(lines)
+
+
+def observation_category(sample):
+    classification = sample['classification']
+    if classification.get('error'): return 'failed'
+    if classification.get('match_status') == 'no_match': return 'not_target'
+    if classification.get('match_status') == 'unknown': return 'insufficient'
+    return 'condition_or_price'

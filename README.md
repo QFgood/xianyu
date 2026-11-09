@@ -1,15 +1,15 @@
-# 闲鱼智能监控系统
+# agent xianyu
 
 [中文] ｜ [English](README_EN.md)
 
-基于 Playwright 和 AI 的闲鱼多任务实时监控，提供完整的 Web 管理界面。
+基于 Playwright 和 AI 的闲鱼行情监控。当前流程为商品库选型、采集详情、独立语义分类；使用说明见[行情采样](docs/market-monitoring.md)。
 
 
 ## 核心特性
 
-- **Web 可视化管理**: 任务管理、账号管理、AI 标准编辑、运行日志、结果浏览
+- **Web 可视化管理**: 任务管理、账号管理、商品库目标选择、运行日志、结果浏览
 - **AI 驱动**: 自然语言创建任务，多模态模型深度分析商品
-- **多任务并发**: 独立配置关键词、价格、筛选条件和 AI Prompt
+- **多任务并发**: 独立配置关键词、价格、筛选条件和结构化目标
 - **高级筛选**: 包邮、新发布时间范围、省/市/区三级区域筛选
 - **即时通知**: 支持 ntfy.sh、企业微信、Bark、Telegram、Webhook等多渠道
 - **定时调度**: 支持 Cron 配置周期性任务
@@ -52,7 +52,6 @@ docker compose up -d
 - 目前默认持久化这些目录：
     - `data/`  SQLite 主存储（任务、结果、价格历史）
     - `state/`  登录状态 cookie 文件
-    - `prompts/`  任务提示词
     - `logs/`  运行日志
     - `images/`  商品图片与任务临时图片目录
     - `config.json`、`jsonl/`、`price_history/`  首次升级到 SQLite 时用于兼容导入的旧数据源
@@ -62,7 +61,7 @@ docker compose up -d
 - 当前在线主存储为 SQLite，默认路径 `data/app.sqlite3`
 - 可通过环境变量 `APP_DATABASE_FILE` 自定义数据库路径；Docker 默认设置为 `/app/data/app.sqlite3`
 - 应用启动时会自动建库建表，并尝试从旧的 `config.json`、`jsonl/`、`price_history/` 导入一次历史数据
-- `state/`、`prompts/`、`logs/`、`images/` 仍然是文件系统目录，不在 SQLite 中
+- `state/`、`logs/`、`images/` 仍然是文件系统目录，不在 SQLite 中
 - 商品图片会临时落到 `images/task_images_<task_name>/`，任务结束后默认会清理
 - 首次升级完成并确认 `data/app.sqlite3` 中数据正确后，可视部署方式决定是否继续保留旧的 `config.json`、`jsonl/`、`price_history/` 挂载
 
@@ -182,7 +181,6 @@ cd web-ui && npm run build
 - `POST /api/tasks/generate`
   - `decision_mode=ai`：返回 `202` 和 `job`，需要继续轮询进度。
   - `decision_mode=keyword`：直接返回已创建任务。
-- `GET /api/tasks/generate-jobs/{job_id}`：查询 AI 任务生成进度。
 - `POST /auth/status`：校验 Web UI 登录凭据。
 
 </details>
@@ -258,9 +256,9 @@ graph TD
 <details>
 <summary>点击展开常见问题</summary>
 
-### AI 任务创建为什么不是立即完成？
+### 现在如何创建与重新分析任务？
 
-AI 模式会先生成分析标准，再创建任务。现在该流程已改为后台 job，提交后会显示独立进度弹窗，避免表单长时间卡住。
+先从商品库选择配置，立即保存任务。采集与AI语义分类分阶段执行；行情页“重新分析”只处理已保存详情，不重复采集。旧Prompt编辑与购买标准生成功能已移除。完整说明见[行情采样](docs/market-monitoring.md)。
 
 ### 区域筛选为什么默认建议留空？
 

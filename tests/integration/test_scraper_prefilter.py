@@ -172,7 +172,7 @@ def replay(monkeypatch, tmp_path):
         return {'卖家昵称': seller_id}
     async def images(item_id, urls, task_name):
         calls['images'].append(item_id)
-        return []
+        return ['/nonexistent/offline-fixture.jpg']
     async def ai(record, paths, prompt):
         assert prompt == 'original prompt with unchanged criteria'
         assert record['卖家信息']['卖家昵称'].startswith('seller')
@@ -305,7 +305,7 @@ def test_cli_sources_reach_actual_scraper(replay, source):
     run, calls = replay
     assert run('enforce', source=source) == 3
     assert calls['detail'] == ['1', '2', '3']
-    assert calls['ai'] == ['1', '2', '3']
+    assert calls['ai'] == []  # retired template paths are not read by CLI
 
 
 def test_repeated_reject_then_corrected_title(replay, capsys):
@@ -455,6 +455,8 @@ def test_market_only_uses_details_and_resamples_seen_prices(replay, monkeypatch)
     run, calls = replay
     async def classify(self, record, images, prompt):
         assert '购买推荐' in prompt and '{{TARGET}}' not in prompt
+        assert len(calls['closed']) == len(calls['detail'])  # all browser collection finished
+        assert len(calls['detail']) in (3,6,7)
         assert record['卖家信息']['信息来源'] == '商品详情页'
         title = record['商品信息']['商品标题']
         return dict(match_status='match' if 'M6 16+256' in title else 'unknown',

@@ -179,7 +179,7 @@ class TaskCreate(BaseModel):
     min_price: Optional[str] = None
     max_price: Optional[str] = None
     cron: Optional[str] = None
-    ai_prompt_base_file: str = "prompts/base_prompt.txt"
+    ai_prompt_base_file: str = ""
     ai_prompt_criteria_file: str = ""
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"

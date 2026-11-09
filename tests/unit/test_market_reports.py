@@ -174,7 +174,7 @@ def test_market_analyzer_does_not_treat_task_labels_as_observed_evidence():
     async def scenario():
         analyze = AsyncMock(return_value=record()['market_analysis'])
         analyzer = MarketAnalyzer()
-        analyzer.client = SimpleNamespace(analyze=analyze)
+        analyzer.client = SimpleNamespace(analyze_or_raise=analyze)
         observed = record() | {'任务名称':'别名M4', '搜索关键字':'其他芯片'}
         result = await analyzer.analyze(observed, [], '明确的结构化目标')
         assert result['match_status'] == 'match'
