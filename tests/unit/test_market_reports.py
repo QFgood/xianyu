@@ -33,12 +33,12 @@ def test_effective_samples_price_changes_and_notification_retry(tmp_path, monkey
                              record('6','100',kind='option_min'), record('7','999', match='unknown'),
                              record('8','500',condition='faulty')])
         assert initial['sample_count'] == 2
-        assert initial['summary']['median'] == 3500  # faulty unit has its own group
+        assert initial['summary']['median'] == 3500  # explicit faulty unit is excluded
         assert 'faulty' not in initial['groups']
         assert len(initial['excluded']) == 6
         assert sent.await_count == 1
         text = format_report(initial)
-        assert '不是成交价' in text and '轻微痕迹' in text
+        assert '不是成交价' in text and '轻微痕迹' not in text
         assert '新推荐' not in text and '购买' not in text
         await run([record('8','500',condition='faulty'), record('2','4000'), record()])
         assert sent.await_count == 1  # order/reason/unknown observations don't matter
@@ -146,7 +146,7 @@ def test_wecom_market_payload_is_compact_and_uses_short_links(tmp_path, monkeypa
     asyncio.run(scenario())
 
 
-def test_only_three_good_condition_grades_enter_market(tmp_path, monkeypatch):
+def test_condition_and_missing_function_state_do_not_filter_target(tmp_path, monkeypatch):
     monkeypatch.setenv('APP_DATABASE_FILE', str(tmp_path/'market.db'))
     async def scenario():
         market = MarketRun(task())
@@ -159,12 +159,11 @@ def test_only_three_good_condition_grades_enter_market(tmp_path, monkeypatch):
         unavailable['market_analysis']['functional_status'] = 'unknown'
         await market.observe(unavailable)
         report = await market.finish('completed',AsyncMock(return_value={}))
-        assert report['sample_count'] == 3
-        assert set(report['groups']) == {'new','like_new','light_wear'}
-        assert all(group['count'] == 1 for group in report['groups'].values())
-        assert len(report['excluded']) == 5
+        assert report['sample_count'] == 6
+        assert report['groups'] == {}
+        assert len(report['excluded']) == 2
         message = format_report(report)
-        assert '故障：' not in message and '几乎全新：1 件' in message
+        assert '故障：' not in message and '几乎全新' not in message
     asyncio.run(scenario())
 
 
@@ -181,4 +180,30 @@ def test_market_analyzer_does_not_treat_task_labels_as_observed_evidence():
         sent = analyze.call_args.args[0]
         assert set(sent) == {'商品信息','卖家信息','analysis_purpose'}
         assert '任务名称' not in sent and sent['商品信息'] == observed['商品信息']
+    asyncio.run(scenario())
+
+
+def test_target_only_payload_and_old_snapshot_never_require_cores_or_condition():
+    from src.services.market_analysis_service import MarketClassification,build_market_prompt
+    from src.domain.models.market_target import MarketTarget
+    payload=record()['market_analysis']
+    for key in ('condition','functional_status','cpu_cores','gpu_cores'): payload.pop(key,None)
+    parsed=MarketClassification.model_validate(payload).model_dump()
+    assert parsed['fault_status']=='not_reported'
+    assert 'condition' not in parsed and 'cpu_cores' not in parsed
+    old=MarketTarget(product_family='mac mini',chip='m6',memory_gb=16,storage_gb=256,cpu_cores=12,gpu_cores=12)
+    assert old.validate_identity(parsed,record()['商品信息'])['match_status']=='match'
+    prompt=build_market_prompt(task(),target=old)
+    assert '"cpu_cores"' not in prompt and '"gpu_cores"' not in prompt
+    assert '"condition"' not in prompt and '12核CPU' not in prompt
+
+
+def test_only_sample_set_and_price_changes_notify_not_condition(tmp_path,monkeypatch):
+    monkeypatch.setenv('APP_DATABASE_FILE',str(tmp_path/'condition.db'))
+    async def scenario():
+        send=AsyncMock(return_value={'wecom':{'success':True}})
+        first=MarketRun(task());await first.observe(record(condition='new'));await first.finish('completed',send)
+        changed=record(condition='unknown');changed['market_analysis']['functional_status']='unknown'
+        second=MarketRun(task());await second.observe(changed);await second.finish('completed',send)
+        assert send.await_count==1
     asyncio.run(scenario())

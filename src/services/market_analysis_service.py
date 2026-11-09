@@ -1,6 +1,6 @@
 """详情页行情分类；与旧的购买画像/推荐 schema 分离。"""
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 from typing import Literal
 from src.infrastructure.external.ai_client import AIClient
 
@@ -14,21 +14,25 @@ class MarketClassification(BaseModel):
     model_config = ConfigDict(extra='ignore')
     match_status: Literal['match', 'no_match', 'unknown']
     price_kind: Literal['whole_unit', 'deposit', 'accessory', 'option_min', 'not_sale', 'unknown']
-    condition: Literal['new', 'like_new', 'light_wear', 'worn', 'faulty', 'unknown']
-    functional_status: Literal['normal', 'faulty', 'unknown'] = 'unknown'
+    fault_status: Literal['faulty', 'not_reported'] = 'not_reported'
     model: str
     reason: str = Field(max_length=1000)
     product_family: str | None = None
     chip: str | None = None
     memory_gb: StrictInt | None = None
     storage_gb: StrictInt | None = None
-    cpu_cores: StrictInt | None = None
-    gpu_cores: StrictInt | None = None
     identity_evidence: str = Field(default='', max_length=1000)
     evidence_source: Literal['text', 'image', 'unknown'] = 'unknown'
     evidence_quotes: list[EvidenceQuote] = Field(default_factory=list,max_length=10)
 
-    @field_validator('memory_gb','storage_gb','cpu_cores','gpu_cores',mode='before')
+    @model_validator(mode='before')
+    @classmethod
+    def legacy_explicit_fault(cls,value):
+        if isinstance(value,dict) and (value.get('condition') == 'faulty' or value.get('functional_status') == 'faulty'):
+            return {**value,'fault_status':'faulty'}
+        return value
+
+    @field_validator('memory_gb','storage_gb',mode='before')
     @classmethod
     def exact_numeric_string(cls,value):
         # Accept JSON numeric strings, never infer units, capacities or a chip.
@@ -39,10 +43,9 @@ def build_market_prompt(task: dict, *, target=None) -> str:
     template = Path('static/market_prompt.txt').read_text(encoding='utf-8')
     # This internal contract ships with the classifier. Old mounted prompts must
     # not silently supply a previous enum/schema after an app upgrade.
-    from dataclasses import asdict
     from src.domain.models.market_target import MarketTarget
     import json
-    template += '\n必须逐项核对的结构化目标：' + json.dumps(asdict(target or MarketTarget.from_task(task)), ensure_ascii=False)
+    template += '\n必须逐项核对的结构化目标：' + json.dumps((target or MarketTarget.from_task(task)).matching_spec(), ensure_ascii=False)
     from src.domain.models.product_selection import ProductSelection
     selected_label = ProductSelection.model_validate(task['product_selection']).label() if task.get('product_selection') else str(task.get('task_name') or task['keyword'])
     return template.replace('{{TARGET}}', selected_label).replace(

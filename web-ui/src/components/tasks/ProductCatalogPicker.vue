@@ -34,7 +34,7 @@ function confirm() {
   if (!candidate.value || !memory.value || !storage.value) return
   const selection = { catalog_id: candidate.value.id, memory_gb: Number(memory.value), storage_gb: Number(storage.value) }
   emit('update:modelValue', selection)
-  emit('selected', { selection, name: `${candidate.value.name}${candidate.value.chip.includes('Pro') ? ` (${candidate.value.cpu_cores}/${candidate.value.gpu_cores}核)` : ''} ${selection.memory_gb}GB ${size(selection.storage_gb)}`, keyword: candidate.value.name })
+  emit('selected', { selection, name: `${candidate.value.name} ${selection.memory_gb}GB ${size(selection.storage_gb)}`, keyword: candidate.value.name })
   editing.value = false
 }
 watch(editing, value => emit('pending', value), { immediate: true })
@@ -54,12 +54,12 @@ onUnmounted(() => { clearTimeout(timer); requestId++ })
       <p v-if="busy" class="text-xs text-slate-500">正在搜索…</p>
       <div v-if="!candidate" class="max-h-60 space-y-2 overflow-y-auto">
         <button v-for="product in products" :key="product.id" type="button" class="flex w-full items-center justify-between gap-2 rounded-lg border bg-white p-3 text-left hover:border-blue-400" @click="choose(product)">
-          <span><span class="block text-sm font-medium">{{ product.name }}{{ product.year ? ` (${product.year})` : '' }}</span><span class="block text-xs text-slate-500">{{ product.cpu_cores }} 核 CPU · {{ product.gpu_cores }} 核 GPU · Apple 官方规格</span></span><span class="text-xs text-blue-600 whitespace-nowrap">选择型号 →</span>
+          <span><span class="block text-sm font-medium">{{ product.name }}{{ product.year ? ` (${product.year})` : '' }}</span><span class="block text-xs text-slate-500">芯片 {{ product.chip }} · Apple 官方规格</span></span><span class="text-xs text-blue-600 whitespace-nowrap">选择型号 →</span>
         </button>
         <p v-if="!products.length && !busy && !error" class="text-sm text-slate-500 py-3">商品库没有匹配型号。请修改搜索词；不会自动用其他代际代替。</p>
       </div>
       <div v-if="candidate" class="rounded-lg border bg-white p-3 space-y-3">
-        <div class="flex justify-between gap-3"><p class="text-sm font-semibold">{{ candidate.name }} · {{ candidate.cpu_cores }}/{{ candidate.gpu_cores }} 核</p><button type="button" class="text-xs text-blue-600" @click="candidate = null">重新选择型号</button></div>
+        <div class="flex justify-between gap-3"><p class="text-sm font-semibold">{{ candidate.name }}</p><button type="button" class="text-xs text-blue-600" @click="candidate = null">重新选择型号</button></div>
         <div class="grid grid-cols-2 gap-3">
           <label class="text-xs text-slate-500">统一内存<select v-model="memory" aria-label="选择目标内存" class="mt-1 w-full border rounded-md p-2 bg-white text-sm text-slate-900"><option value="" disabled>请选择内存</option><option v-for="gb in candidate.memory_options" :key="gb" :value="String(gb)">{{ size(gb) }}</option></select></label>
           <label class="text-xs text-slate-500">内置 SSD<select v-model="storage" aria-label="选择目标内置SSD" class="mt-1 w-full border rounded-md p-2 bg-white text-sm text-slate-900"><option value="" disabled>请选择SSD</option><option v-for="gb in candidate.storage_options" :key="gb" :value="String(gb)">{{ size(gb) }}</option></select></label>
@@ -69,8 +69,8 @@ onUnmounted(() => { clearTimeout(timer); requestId++ })
       </div>
     </template>
     <div v-else-if="modelValue" class="space-y-2">
-      <p class="text-sm font-medium">{{ selected?.name || modelValue.catalog_id }}<span v-if="selected"> · {{ selected.cpu_cores }}/{{ selected.gpu_cores }} 核</span> · {{ modelValue.memory_gb }}GB · {{ size(modelValue.storage_gb) }} 内置 SSD</p>
-      <p class="text-xs text-slate-500">已锁定所选型号、芯片、核心数和容量。下面的补充说明不能覆盖这些配置。</p>
+      <p class="text-sm font-medium">{{ selected?.name || modelValue.catalog_id }} · {{ modelValue.memory_gb }}GB · {{ size(modelValue.storage_gb) }} 内置 SSD</p>
+      <p class="text-xs text-slate-500">已锁定所选型号、芯片与容量，不要求核心数量或成色信息。</p>
     </div>
   </section>
 </template>

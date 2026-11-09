@@ -112,7 +112,8 @@ def test_internal_contract_ignores_stale_user_prompt(db,monkeypatch):
     root=db/'empty';root.mkdir();(root/'static').symlink_to(Path('static').resolve(),target_is_directory=True)
     monkeypatch.chdir(root)
     text=build_market_prompt(task())
-    assert 'like_new' in text and '结构化目标' in text
+    assert 'fault_status' in text and '结构化目标' in text
+    assert 'like_new' not in text and '"cpu_cores"' not in text
     assert not (root/'prompts').exists()
 
 
@@ -169,3 +170,39 @@ def test_unverifiable_ai_narrative_gets_one_evidence_repair(db):
         row=MarketBatchRepository().candidates(run.run_id)[0]
         assert row['attempts']==2 and row['error_code'] is None
     asyncio.run(scenario())
+
+
+def test_reanalyze_excluded_preserves_accepted_without_model_calls(db):
+    async def scenario():
+        run=MarketRun(task());collection=MarketCollection(run)
+        for id in ('1','2','3'): await collection.collect(detail(id))
+        await collection.seal('completed')
+        initial=SimpleNamespace(analyze=AsyncMock(side_effect=[result(), result(match='unknown'), result('M4','no_match')]))
+        send=AsyncMock(return_value={});save=AsyncMock(return_value=True)
+        first=await classify_market_batch(run.run_id,analyzer=initial,saver=save,notifier=send)
+        assert [s['item_id'] for s in first['samples']]==['1']
+        async def retry(record,*_):
+            assert record['商品信息']['商品ID']!='1','accepted sample must not be sent to model'
+            return result() if record['商品信息']['商品ID']=='2' else result('M4','no_match')
+        second=SimpleNamespace(analyze=AsyncMock(side_effect=retry))
+        report=await classify_market_batch(run.run_id,analyzer=second,saver=save,notifier=send,reanalyze_excluded=True)
+        assert second.analyze.await_count==2
+        assert [s['item_id'] for s in report['samples']]==['1','2']
+        rows=MarketBatchRepository().candidates(run.run_id)
+        assert next(r for r in rows if r['item_id']=='1')['attempts']==1
+        assert next(r for r in rows if r['item_id']=='2')['attempts']==2
+    asyncio.run(scenario())
+
+
+def test_api_accepts_excluded_scope(api_client,db,monkeypatch):
+    from src.services.background_task_service import BackgroundTaskService
+    queued=[]
+    monkeypatch.setattr(BackgroundTaskService,'track',lambda self,coro:queued.append(coro))
+    run=MarketRun(task());collection=MarketCollection(run)
+    asyncio.run(collection.collect(detail()));asyncio.run(collection.seal('completed'))
+    response=api_client.post(f'/api/market/reports/{run.run_id}/reanalyze',json={'scope':'excluded'})
+    assert response.status_code==202
+    assert queued[0].cr_frame.f_locals['reanalyze_excluded'] is True
+    assert queued[0].cr_frame.f_locals['rerun_all'] is False
+    queued.pop().close()
+    assert api_client.post(f'/api/market/reports/{run.run_id}/reanalyze',json={'scope':'invalid'}).status_code==422

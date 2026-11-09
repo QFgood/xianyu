@@ -11,6 +11,12 @@ class MarketReportRepository:
                          (report['run_id'], report['task_key'], report['cohort'], report['created_at'], json.dumps(report, ensure_ascii=False)))
             conn.commit()
 
+    def get(self, run_id):
+        with sqlite_connection() as conn:
+            init_schema(conn)
+            row=conn.execute('SELECT payload FROM market_reports WHERE run_id=?',(run_id,)).fetchone()
+            return json.loads(row[0]) if row else None
+
     def reports(self, task_key=None, limit=100):
         with sqlite_connection() as conn:
             init_schema(conn)

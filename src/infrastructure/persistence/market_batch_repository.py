@@ -64,10 +64,13 @@ class MarketBatchRepository:
             conn.commit()
             return True
 
-    def reset(self, batch_id):
+    def reset(self, batch_id, keep_item_ids=()):
         with sqlite_connection() as conn:
             init_schema(conn)
-            conn.execute('UPDATE market_candidates SET analysis_json=NULL,error_code=NULL WHERE batch_id=?',(batch_id,))
+            keep=set(keep_item_ids)
+            rows=conn.execute('SELECT item_id FROM market_candidates WHERE batch_id=?',(batch_id,)).fetchall()
+            conn.executemany('UPDATE market_candidates SET analysis_json=NULL,error_code=NULL WHERE batch_id=? AND item_id=?',
+                             [(batch_id,r['item_id']) for r in rows if r['item_id'] not in keep])
             conn.commit()
 
     def checkpoint(self, batch_id, item_id, analysis, error_code, attempts):

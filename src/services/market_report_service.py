@@ -41,7 +41,7 @@ class MarketRun:
                       'prefilter', 'product_selection', 'decision_mode', 'keyword_rules', 'analyze_images')
         scope = {key: task.get(key) for key in scope_keys}
         self.task_key = str(task.get('id') if task.get('id') is not None else task['task_name'])
-        scope.update(task_key=self.task_key, prompt=self.prompt, version=2)
+        scope.update(task_key=self.task_key, prompt=self.prompt, version=3)
         self.cohort = hashlib.sha256(json.dumps(scope, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
     def prompt_target_label(self):
@@ -56,17 +56,18 @@ class MarketRun:
     async def observe(self, record):
         item = record['商品信息']
         classification = self.target.validate_identity(record['market_analysis'], item)
-        if classification.get('match_status') == 'match':
-            if classification.get('condition') not in {'new','like_new','light_wear'}:
-                classification['reason'] = '成色不符合全新、几乎全新、轻微痕迹三档，不纳入行情'
-            elif classification.get('functional_status') != 'normal':
-                classification['reason'] = '功能异常或未确认功能正常，不纳入行情'
+        # Missing cosmetic/functional declarations are not a rejection. Keep only
+        # explicit fault exclusions, including old saved classifier outputs.
+        faulty = (classification.get('fault_status') == 'faulty' or
+                  classification.get('functional_status') == 'faulty' or
+                  classification.get('condition') == 'faulty')
+        if classification.get('match_status') == 'match' and faulty:
+            classification['reason'] = '详情明确说明故障或功能异常，不纳入行情'
         record['market_analysis'] = classification
         price = parse_price_value(item.get('当前售价'))
         valid = (classification.get('match_status') == 'match' and
                  classification.get('price_kind') == 'whole_unit' and
-                 classification.get('condition') in {'new','like_new','light_wear'} and
-                 classification.get('functional_status') == 'normal' and price is not None and
+                 not faulty and price is not None and
                  math.isfinite(price) and price > 0)
         key = str(item.get('商品ID') or item.get('商品链接'))
         self.observations[key] = dict(item_id=key, title=item.get('商品标题'),
@@ -90,13 +91,12 @@ class MarketRun:
                       summary=summarize(samples),
                       sample_count=len(samples), samples=samples,
                       excluded=[s for s in self.observations.values() if not s['valid']],
-                      groups={condition: summarize([s for s in samples if s['classification']['condition'] == condition])
-                              for condition in ('new','like_new','light_wear')})
+                      groups={})
         report['categories'] = {category: [sample for sample in report['excluded'] if observation_category(sample) == category]
                                 for category in ('not_target','insufficient','condition_or_price','failed')}
         # Compare with last successfully delivered sample set; failed sends can retry.
         baseline = await asyncio.to_thread(self.repository.delivered, self.cohort)
-        current = {s['item_id']: {'price': s['price'], 'condition': s['classification']['condition']} for s in samples}
+        current = {s['item_id']: {'price': s['price']} for s in samples}
         before = baseline or {}
         report['changes'] = dict(added=len(current.keys()-before.keys()),
                                  missing=len(before.keys()-current.keys()),
@@ -123,13 +123,9 @@ def format_report(report):
         lines.append(f"有效样本中间50%标价：¥{summary['p25']:g}–¥{summary['p75']:g}")
     if summary['count'] < 4:
         lines.append('样本较少，暂不判断市场趋势。')
-    labels = {'new':'全新', 'like_new':'几乎全新', 'light_wear':'轻微痕迹'}
-    for condition, group in report['groups'].items():
-        if group['count']:
-            lines.append(f"{labels[condition]}：{group['count']} 件，中位 ¥{group['median']:g}")
     change = report['changes']
     lines.append(f"较上次推送：新增观察 {change['added']}，价格变化 {change['repriced']}，本轮未见 {change['missing']}")
-    lines.append(f"不匹配/信息不明/成色或功能不符：{len(report['excluded'])} 件；标题明确非目标：{report.get('title_rejected', 0)} 件")
+    lines.append(f"不匹配/信息不明/报价或明确故障问题：{len(report['excluded'])} 件；标题明确非目标：{report.get('title_rejected', 0)} 件")
     lines.append('仅为卖家在售标价，不是成交价；本轮未见不代表已售。')
     return '\n'.join(lines)
 

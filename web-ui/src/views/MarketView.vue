@@ -2,8 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type Summary = { count: number; min: number | null; max: number | null; median: number | null; p25: number | null; p75: number | null }
-type Sample = { item_id: string; title: string; price: number | null; link: string; seller: Record<string, unknown>; classification: { model: string; condition: string; reason: string; error?: string; match_status?: string; identity_evidence?: string; verified_evidence?: {source: string; text: string}[]; catalog_evidence_note?: string } }
-type Report = { run_id: string; task_key: string; cohort: string; task_name: string; created_at: string; status: string; target: string; sample_count: number; title_rejected?: number; summary: Summary; groups: Record<string, Summary>; samples: Sample[]; excluded: Sample[]; errors: string[]; scope: Record<string, unknown> }
+type Sample = { item_id: string; title: string; price: number | null; link: string; seller: Record<string, unknown>; classification: { model: string; condition?: string; reason: string; error?: string; match_status?: string; identity_evidence?: string; verified_evidence?: {source: string; text: string}[]; catalog_evidence_note?: string } }
+type Report = { run_id: string; task_key: string; cohort: string; task_name: string; created_at: string; status: string; target: string; sample_count: number; title_rejected?: number; summary: Summary; samples: Sample[]; excluded: Sample[]; errors: string[]; scope: Record<string, unknown> }
 type Batch = { created_at: string; id: string; task_key: string; task_name: string; state: string; collection_status: string; collected: number; classified: number; failed: number; target: Record<string, unknown> }
 const batches = ref<Batch[]>([])
 const reanalyzing = ref(false)
@@ -25,7 +25,7 @@ const currentBatch = computed(() => {
 })
 const working = computed(() => ['collecting', 'classifying'].includes(currentBatch.value?.state || ''))
 const phaseLabels: Record<string, string> = { collecting: '① 采集商品详情', collected: '① 采集已结束 · 等待分析', classifying: '② AI正在理解详情并核对目标', completed: '② AI分析完成', classification_failed: '② AI分析有失败项，可重新分析' }
-const categoryLabels: Record<string, string> = { not_target: '不符合目标', insufficient: '信息不足，待确认', condition_or_price: '成色、功能或报价不符合', failed: 'AI分类调用失败' }
+const categoryLabels: Record<string, string> = { not_target: '不符合目标', insufficient: '信息不足，待确认', condition_or_price: '报价或明确故障问题', failed: 'AI分类调用失败' }
 const displayLimits = ref<Record<string, number>>({})
 const categories = computed(() => {
   const result: Record<string, Sample[]> = { not_target: [], insufficient: [], condition_or_price: [], failed: [] }
@@ -36,12 +36,12 @@ const categories = computed(() => {
   }
   return result
 })
-async function reanalyze() {
-  const id = currentBatch.value?.id || current.value?.run_id
+async function reanalyze(scope: 'all' | 'excluded' = 'all') {
+  const id = scope === 'excluded' ? current.value?.run_id : (currentBatch.value?.id || current.value?.run_id)
   if (!id || reanalyzing.value || working.value) return
   reanalyzing.value = true
   try {
-    const response = await fetch(`/api/market/reports/${encodeURIComponent(id)}/reanalyze`, { method: 'POST' })
+    const response = await fetch(`/api/market/reports/${encodeURIComponent(id)}/reanalyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({scope}) })
     const data = await response.json()
     if (!response.ok) throw new Error(data.detail || '无法提交重新分析')
     selectedBatch.value = data.batch_id
@@ -50,7 +50,6 @@ async function reanalyze() {
   } catch (e) { error.value = e instanceof Error ? e.message : '无法提交重新分析' }
   finally { reanalyzing.value = false }
 }
-const labels: Record<string, string> = { new: '全新', like_new: '几乎全新', light_wear: '轻微痕迹' }
 const money = (value: number | null | undefined) => value == null ? '—' : `¥${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
 const date = (value: string) => new Date(value).toLocaleString('zh-CN')
 function safeLink(link: string) {
@@ -77,7 +76,7 @@ onUnmounted(() => clearInterval(timer))
   <div class="max-w-7xl mx-auto space-y-6 p-4 sm:p-8">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div><h1 class="text-2xl font-bold text-slate-900">市场行情</h1><p class="text-sm text-slate-500 mt-2">目标配置的在售标价快照 · 有效样本或价格变化时推送</p></div>
-      <div class="flex gap-2"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50" :disabled="(!current && !currentBatch) || working || reanalyzing" title="重新分析已保存的详情和目标，不访问闲鱼页面；旧报告使用当前任务目标复核本地保存详情" @click="reanalyze">{{ reanalyzing ? '提交中…' : currentBatch?.state === 'classifying' ? '分析中…' : '重新分析' }}</button>
+      <div class="flex flex-wrap gap-2"><button class="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm text-blue-700 disabled:opacity-50" :disabled="!current?.excluded.length || working || reanalyzing" title="只重新调用模型分析未纳入的条目，保留已有效样本" @click="reanalyze('excluded')">仅重筛未纳入</button><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50" :disabled="(!current && !currentBatch) || working || reanalyzing" title="重新分析已保存的详情和目标，不访问闲鱼页面；旧报告使用当前任务目标复核本地保存详情" @click="reanalyze('all')">{{ reanalyzing ? '提交中…' : currentBatch?.state === 'classifying' ? '分析中…' : '重新分析' }}</button>
       <button class="rounded-lg border bg-white px-4 py-2 text-sm" :disabled="loading" @click="refresh">{{ loading ? '加载中…' : '刷新行情' }}</button></div>
     </header>
     <p v-if="error" role="alert" class="text-red-600">{{ error }}</p>
@@ -99,23 +98,20 @@ onUnmounted(() => clearInterval(timer))
         <div class="flex flex-wrap justify-between gap-2"><h2 class="font-semibold text-lg">{{ current.task_name }}</h2><span :class="current.status === 'complete' ? 'text-emerald-700' : 'text-amber-700'">{{ current.status === 'complete' ? '本轮采样完成' : '本轮采样不完整 · 不推送行情变化' }}</span></div>
         <p class="text-sm text-slate-600 whitespace-pre-wrap">{{ current.target }}</p>
         <p class="text-xs text-slate-500">{{ date(current.created_at) }} · 搜索词 {{ current.scope.keyword }} · {{ current.scope.max_pages || 1 }} 页 · {{ current.scope.personal_only ? '仅个人卖家' : '全部卖家' }} · {{ current.scope.free_shipping ? '仅包邮' : '不限运费' }} · 地区 {{ current.scope.region || '全国' }} · 价格 {{ current.scope.min_price || '不限' }}–{{ current.scope.max_price || '不限' }}</p>
-        <p class="text-sm text-slate-600">配置、报价、成色及功能符合：{{ current.sample_count }} 件；不匹配、信息不明或成色/功能不符：{{ current.excluded.length }} 件。标题已排除明确非目标 {{ current.title_rejected || 0 }} 件。信用信息来自商品详情页。</p>
+        <p class="text-sm text-slate-600">型号配置及整机报价符合：{{ current.sample_count }} 件；未纳入：{{ current.excluded.length }} 件。标题已排除明确非目标 {{ current.title_rejected || 0 }} 件。信用信息来自商品详情页。</p>
         <p v-if="current.errors.length" class="text-sm text-amber-700">{{ current.errors.join('；') }}</p>
       </section>
       <div class="grid gap-4 sm:grid-cols-3">
-        <section v-for="(group, condition) in current.groups" :key="condition" class="rounded-xl border bg-white p-5 space-y-2">
-          <h3 class="text-sm text-slate-500">{{ labels[condition] }} · {{ group.count }} 件</h3>
-          <p class="text-2xl font-semibold">{{ money(group.median) }}<span class="ml-2 text-xs font-normal text-slate-400">中位数</span></p>
-          <p class="text-xs text-slate-500">范围 {{ money(group.min) }}–{{ money(group.max) }}</p>
-          <p class="text-xs text-slate-500">{{ group.count >= 4 ? `中间50% ${money(group.p25)}–${money(group.p75)}` : '样本较少，不推断市场趋势' }}</p>
-        </section>
+        <section class="rounded-xl border bg-white p-5"><p class="text-sm text-slate-500">目标整机有效样本</p><p class="mt-2 text-2xl font-semibold">{{ current.sample_count }} 件</p></section>
+        <section class="rounded-xl border bg-white p-5"><p class="text-sm text-slate-500">在售标价中位数</p><p class="mt-2 text-2xl font-semibold">{{ money(current.summary.median) }}</p></section>
+        <section class="rounded-xl border bg-white p-5"><p class="text-sm text-slate-500">在售标价范围</p><p class="mt-2 text-xl font-semibold">{{ money(current.summary.min) }}–{{ money(current.summary.max) }}</p><p class="text-xs text-slate-500 mt-2">{{ current.summary.count >= 4 ? `中间50% ${money(current.summary.p25)}–${money(current.summary.p75)}` : '样本较少，不推断市场趋势' }}</p></section>
       </div>
-      <p class="text-sm text-slate-500">这是本轮搜索范围内的卖家标价，不是成交价或全市场报价。未再观察到的商品不代表已售。仅统计全新、几乎全新、轻微痕迹且功能正常的商品；故障机、明显磨损及信息不明不计入有效样本。</p>
+      <p class="text-sm text-slate-500">按出售品类、芯片、内存和内置SSD核对目标，不检查CPU/GPU核心数量，不分成色。未写成色或功能正常不影响纳入；明确故障、配件、定金或报价不明仍排除。这里是卖家标价，不是成交价或全市场估值。</p>
       <section class="rounded-xl border bg-white overflow-hidden">
         <h2 class="font-semibold p-5 border-b">有效样本</h2>
-        <div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">商品 / 配置</th><th class="p-4">标价</th><th class="p-4">成色</th><th class="p-4">详情页信用</th></tr></thead><tbody>
-          <tr v-for="sample in current.samples" :key="sample.item_id" class="border-t"><td class="p-4 min-w-64"><a :href="safeLink(sample.link)" target="_blank" rel="noopener noreferrer" class="text-blue-600">{{ sample.title }}</a><p class="text-xs text-slate-500 mt-1">{{ sample.classification.model }}</p></td><td class="p-4 font-semibold whitespace-nowrap">{{ money(sample.price) }}</td><td class="p-4 whitespace-nowrap">{{ labels[sample.classification.condition] }}</td><td class="p-4">{{ sample.seller['卖家信用等级'] || sample.seller['卖家芝麻信用'] || '详情页未提供' }}</td></tr>
-          <tr v-if="!current.samples.length"><td colspan="4" class="p-6 text-slate-500">本轮没有可确认的整机配置和报价。</td></tr>
+        <div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-4">商品 / 配置</th><th class="p-4">标价</th><th class="p-4">详情页信用</th></tr></thead><tbody>
+          <tr v-for="sample in current.samples" :key="sample.item_id" class="border-t"><td class="p-4 min-w-64"><a :href="safeLink(sample.link)" target="_blank" rel="noopener noreferrer" class="text-blue-600">{{ sample.title }}</a><p class="text-xs text-slate-500 mt-1">{{ sample.classification.model }}</p></td><td class="p-4 font-semibold whitespace-nowrap">{{ money(sample.price) }}</td><td class="p-4">{{ sample.seller['卖家信用等级'] || sample.seller['卖家芝麻信用'] || '详情页未提供' }}</td></tr>
+          <tr v-if="!current.samples.length"><td colspan="3" class="p-6 text-slate-500">本轮没有可确认的整机配置和报价。</td></tr>
         </tbody></table></div>
       </section>
       <details v-for="(items, category) in categories" :key="category" class="rounded-xl border bg-white p-5">

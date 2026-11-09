@@ -28,6 +28,7 @@ class MarketTarget:
     chip: str | None = None
     memory_gb: int | None = None
     storage_gb: int | None = None
+    # Retained only to decode historical batch snapshots; never used as constraints.
     cpu_cores: int | None = None
     gpu_cores: int | None = None
 
@@ -39,7 +40,7 @@ class MarketTarget:
             selected = ProductSelection.model_validate(selection)
             product = find_product(selected.catalog_id)
             return cls(product['product_family'], chip_name(product['chip']), selected.memory_gb,
-                       selected.storage_gb, product['cpu_cores'], product['gpu_cores'])
+                       selected.storage_gb)
         # Task name is the primary identity. Description fills missing constraints.
         name = normalize(task.get('task_name') or task.get('keyword'))
         name = re.sub(r'(?<![a-z])mac\s*mini', 'mac mini ', name)
@@ -68,6 +69,10 @@ class MarketTarget:
                 storage = storage or int(disk[1]) * (1024 if (disk[2] or '').startswith('t') else 1)
         return cls(family, chip, memory, storage)
 
+    def matching_spec(self):
+        # Old packets may still contain core counts; they are metadata, not constraints.
+        return {key: getattr(self,key) for key in ('product_family','chip','memory_gb','storage_gb')}
+
     def reject_title(self, title):
         """Reject only an explicit other Mac mini generation; ambiguity goes to details."""
         text = normalize(title)
@@ -89,12 +94,12 @@ class MarketTarget:
             return result
         actual = dict(product_family=normalize(result.get('product_family')),
                       chip=chip_name(result.get('chip')), memory_gb=result.get('memory_gb'),
-                      storage_gb=result.get('storage_gb'), cpu_cores=result.get('cpu_cores'), gpu_cores=result.get('gpu_cores'))
+                      storage_gb=result.get('storage_gb'))
         for key in ('product_family', 'chip', 'memory_gb', 'storage_gb'):
             target = getattr(self, key)
             if target is None:
                 continue
-            label = {'product_family':'商品品类','chip':'芯片型号','memory_gb':'内存容量','storage_gb':'内置硬盘容量','cpu_cores':'CPU核心数','gpu_cores':'GPU核心数'}[key]
+            label = {'product_family':'商品品类','chip':'芯片型号','memory_gb':'内存容量','storage_gb':'内置硬盘容量'}[key]
             observed = actual[key]
             if observed is None or observed == '':
                 result.update(match_status='unknown', reason=f'出售商品的{label}证据不足，不计入目标行情')
@@ -102,7 +107,7 @@ class MarketTarget:
             if observed != target:
                 result.update(match_status='no_match', reason=f'出售商品的{label}为{observed}，目标为{target}')
                 return result
-        from src.domain.models.market_evidence import verified_excerpts, unique_catalog_cores
+        from src.domain.models.market_evidence import verified_excerpts
         verified, referenced = verified_excerpts(result,item,self.chip)
         if not verified:
             code = 'replacement_reference' if referenced else 'unverified_excerpt'
@@ -111,26 +116,6 @@ class MarketTarget:
             result.update(match_status='unknown',reason=reason,uncertainty_code=code)
             return result
         result['verified_evidence'] = verified
-        # Fill only a uniquely published specification for the observed chip.
-        # Never copy the desired CPU/GPU numbers into an unconfirmed listing.
-        pair = unique_catalog_cores(actual['product_family'],actual['chip'])
-        derived=[]
-        for index,key in enumerate(('cpu_cores','gpu_cores')):
-            if actual[key] is None and pair:
-                actual[key]=pair[index]
-                result[key]=pair[index]
-                derived.append(key)
-            expected=getattr(self,key)
-            if expected is None: continue
-            if actual[key] is None:
-                result.update(match_status='unknown',reason='该芯片有多个核心版本，详情未确认具体版本',uncertainty_code='core_variant_unknown')
-                return result
-            if actual[key]!=expected:
-                result.update(match_status='no_match',reason=f'出售商品的{key}为{actual[key]}，目标为{expected}')
-                return result
-        if derived:
-            result['catalog_derived_fields']=derived
-            result['catalog_evidence_note']='CPU/GPU核心数依据已核实芯片的商品库唯一规格补全；不是从目标值推测'
         text = normalize(str(item.get('商品标题') or '')+' '+str(item.get('商品描述') or ''))
         text_chips=chips_in(text)
         if self.chip and len(text_chips)==1 and self.chip not in text_chips:
