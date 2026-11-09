@@ -10,7 +10,7 @@ from src.services.market_classification_service import MarketCollection, classif
 from src.services.market_report_service import MarketRun
 
 
-async def prepare_reanalysis(report_id):
+async def prepare_reanalysis(report_id, *, excluded_only=False):
     repository = MarketBatchRepository()
     existing = await asyncio.to_thread(repository.get,report_id)
     if existing:
@@ -34,6 +34,8 @@ async def prepare_reanalysis(report_id):
         task = None
     if task is None:
         raise HTTPException(status_code=409,detail='旧报告没有目标快照，原任务已不存在，无法安全重新分析。')
+    if excluded_only:
+        raise HTTPException(status_code=409,detail='此旧报告没有完整采集快照，请先完整重新分析一次，之后可仅重筛未纳入样本。')
     observations = report.get('samples',[]) + report.get('excluded',[])
     ids = {str(s['item_id']) for s in observations}
     def saved_details():

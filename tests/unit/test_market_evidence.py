@@ -18,8 +18,8 @@ def test_summary_and_short_literal_excerpts_are_separate():
     assert result['match_status']=='match'
     assert result['identity_evidence']=='模型说明文字，不等于原文'
     assert result['verified_evidence']==[dict(source='title',text=title)]
-    assert (result['cpu_cores'],result['gpu_cores'])==(12,12)
-    assert set(result['catalog_derived_fields'])=={'cpu_cores','gpu_cores'}
+    assert result['cpu_cores'] is None and result['gpu_cores'] is None
+    assert 'catalog_derived_fields' not in result
 
 
 def test_legacy_narrative_grounds_only_real_quoted_fragments():
@@ -59,13 +59,12 @@ def test_invented_wrong_source_and_capacity_remain_excluded():
     assert target().validate_identity(data,{'商品标题':'Mac mini M6 16+512'})['match_status']=='no_match'
 
 
-def test_unique_core_inference_never_chooses_a_pro_variant():
+def test_core_counts_never_gate_even_pro_targets():
     title='Mac mini M4 Pro 24+512'
     data=analysis(evidence_quotes=[dict(source='title',text=title)])
     data.update(chip='M4 Pro',memory_gb=24,storage_gb=512)
     result=target('apple-mac-mini-m4-pro-12-16',24,512).validate_identity(data,{'商品标题':title})
-    assert result['match_status']=='unknown'
-    assert result['uncertainty_code']=='core_variant_unknown'
+    assert result['match_status']=='match'
     explicit=analysis(evidence_quotes=[dict(source='title',text='Mac mini M6 16+256')])
     explicit['cpu_cores']=10
-    assert target().validate_identity(explicit,{'商品标题':'Mac mini M6 16+256'})['match_status']=='no_match'
+    assert target().validate_identity(explicit,{'商品标题':'Mac mini M6 16+256'})['match_status']=='match'

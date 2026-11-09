@@ -26,4 +26,4 @@ class ProductSelection(BaseModel):
 
     def label(self):
         model = find_product(self.catalog_id)
-        return f"{model['name']} / {model['cpu_cores']}核CPU {model['gpu_cores']}核GPU / {self.memory_gb}GB / {self.storage_gb}GB内置SSD"
+        return f"{model['name']} / {self.memory_gb}GB / {self.storage_gb}GB内置SSD"

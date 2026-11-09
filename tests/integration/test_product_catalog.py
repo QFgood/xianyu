@@ -44,10 +44,10 @@ def test_selected_product_overrides_name_description_and_prompt_guesses(tmp_path
         assert task.product_selection.model_dump() == SELECTION
         assert task.keyword == 'Mac mini M6' and task.decision_mode == 'ai'
         target = MarketTarget.from_task(task.model_dump())
-        assert (target.chip,target.memory_gb,target.storage_gb,target.cpu_cores,target.gpu_cores) == ('m6',16,256,12,12)
+        assert (target.chip,target.memory_gb,target.storage_gb,target.cpu_cores,target.gpu_cores) == ('m6',16,256,None,None)
         assert target.reject_title('Mac mini M4 16+256')
         prompt = build_market_prompt(task.model_dump())
-        assert '目标：Mac mini M6 / 12核CPU 12核GPU / 16GB / 256GB内置SSD' in prompt
+        assert '目标：Mac mini M6 / 16GB / 256GB内置SSD' in prompt
         # PATCH keeps the nested typed selection; saving/reloading doesn't lose it.
         updated = await service.update_task(task.id,TaskUpdate(description='新的补充说明',keyword='Mac mini M4'))
         assert updated.keyword == 'Mac mini M6'
@@ -61,10 +61,10 @@ def test_selected_product_overrides_name_description_and_prompt_guesses(tmp_path
     asyncio.run(scenario())
 
 
-def test_catalog_core_variant_is_not_interchangeable():
+def test_same_chip_core_variant_is_not_a_filter():
     target = MarketTarget.from_task({'product_selection':dict(catalog_id='apple-mac-mini-m4-pro-12-16',memory_gb=24,storage_gb=512)})
     result = dict(match_status='match',product_family='mac mini',chip='M4 Pro',memory_gb=24,storage_gb=512,
                   cpu_cores=14,gpu_cores=20,identity_evidence='Mac mini M4 Pro',evidence_source='text')
-    assert target.validate_identity(result,{'商品标题':'Mac mini M4 Pro'})['match_status'] == 'no_match'
+    assert target.validate_identity(result,{'商品标题':'Mac mini M4 Pro'})['match_status'] == 'match'
     result['cpu_cores'] = None
-    assert target.validate_identity(result,{'商品标题':'Mac mini M4 Pro'})['match_status'] == 'unknown'
+    assert target.validate_identity(result,{'商品标题':'Mac mini M4 Pro'})['match_status'] == 'match'

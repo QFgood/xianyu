@@ -50,11 +50,3 @@ def verified_excerpts(result, item, chip):
         else:
             referenced=True
     return verified, referenced
-
-
-def unique_catalog_cores(family, chip):
-    from src.domain.catalog.mac_mini import MODELS
-    from src.domain.models.market_target import chip_name
-    pairs={(p['cpu_cores'],p['gpu_cores']) for p in MODELS
-           if p['product_family']==family and chip_name(p['chip'])==chip}
-    return next(iter(pairs)) if len(pairs)==1 else None

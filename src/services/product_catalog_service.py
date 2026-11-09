@@ -11,9 +11,11 @@ def search_products(query=''):
     text = re.sub(r'(m\d+)(pro|max|ultra)', r'\1 \2', text)
     tokens = text.split()
     result = []
+    seen = set()
     for model in MODELS:
         searchable = normalize(f"{model['name']} {model['chip']} {model['year'] or ''} Apple 苹果 Mac mini 迷你主机")
-        if all(token in searchable for token in tokens):
+        if all(token in searchable for token in tokens) and model['chip'] not in seen:
+            seen.add(model['chip'])
             result.append(deepcopy(model))
     return {'revision': REVISION, 'items': result}
 

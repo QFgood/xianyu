@@ -84,7 +84,7 @@ class MarketCollection:
 
 
 async def classify_market_batch(batch_id, *, image_downloader=None, saver=None, notifier=None,
-                                analyzer=None, skip_ai=False, rerun_all=False):
+                                analyzer=None, skip_ai=False, rerun_all=False, reanalyze_excluded=False):
     from src.ai_handler import download_all_images
     from src.utils import save_to_jsonl
     from src.domain.models.market_target import MarketTarget
@@ -93,8 +93,13 @@ async def classify_market_batch(batch_id, *, image_downloader=None, saver=None, 
         if not acquired or not await asyncio.to_thread(repository.claim,batch_id):
             return None
         batch = await asyncio.to_thread(repository.get,batch_id)
-        if rerun_all:
-            await asyncio.to_thread(repository.reset,batch_id)
+        if rerun_all or reanalyze_excluded:
+            keep=[]
+            if reanalyze_excluded:
+                from src.infrastructure.persistence.market_report_repository import MarketReportRepository
+                previous=await asyncio.to_thread(MarketReportRepository().get,batch_id)
+                keep=[s['item_id'] for s in (previous or {}).get('samples',[])]
+            await asyncio.to_thread(repository.reset,batch_id,keep)
         task = json.loads(batch['task_json'])
         market = MarketRun(task,target=MarketTarget(**json.loads(batch['target_json'])))
         market.run_id = batch_id
@@ -167,7 +172,8 @@ async def classify_market_batch(batch_id, *, image_downloader=None, saver=None, 
                 record['ai_analysis'] = dict(analysis_source='market',is_recommended=False,
                                              reason=record['market_analysis']['reason'],keyword_hit_count=0)
                 await save(record,task['keyword'])
-                print(f'market.classification.progress batch={batch_id} completed={index}/{len(rows)} outcome={result.get("error") or result.get("match_status")}')
+                analysis_source = 'saved' if row['analysis_json'] else 'ai'
+                print(f'market.classification.progress batch={batch_id} completed={index}/{len(rows)} outcome={result.get("error") or result.get("match_status")} source={analysis_source}')
             latest = next((b for b in await asyncio.to_thread(repository.list,1000) if b['task_key'] == market.task_key),None)
             report = await market.finish(batch['collection_status'],notifier,
                                          allow_notification=bool(latest and latest['id'] == batch_id))
